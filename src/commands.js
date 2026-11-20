@@ -145,8 +145,9 @@ async function scanGraph(day = "today") {
   const channels = info.channels
 
   const rows = [
-    1320, 1440, 1560, 1800, 1920
-  ]
+  1650, 1700, 1750, 1800, 1850,
+  1900, 1950, 2000, 2050, 2100
+]
 
   let result = `Розмір: ${width} × ${height}\n`
 
