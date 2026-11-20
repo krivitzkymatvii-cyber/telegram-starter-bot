@@ -23,7 +23,8 @@ async function viberRequest(method, payload = {}) {
 
   if (!response.ok || data.status !== 0) {
     throw new Error(
-      `Viber API error: ${data.status_message || response.statusText}`
+      `Viber API error: ${data.status_message || response.statusText} ` +
+        `(status ${data.status}, http ${response.status}) ${JSON.stringify(data)}`
     )
   }
 
