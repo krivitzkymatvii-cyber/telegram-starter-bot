@@ -32,7 +32,13 @@ function line(label, d, i) {
 }
 
 // Повертає текст погоди на сьогодні й завтра, або "" якщо сервіс недоступний
+const cache = new Map()
+
 export async function getWeatherText(lat, lon) {
+  const key = `${lat},${lon}`
+  const hit = cache.get(key)
+  if (hit && Date.now() - hit.at < 30 * 60_000) return hit.text
+
   try {
     const url = new URL("https://api.open-meteo.com/v1/forecast")
     url.searchParams.set("latitude", lat)
@@ -53,12 +59,14 @@ export async function getWeatherText(lat, lon) {
 
     const { daily } = await response.json()
 
-    return (
+    const text =
       "🌍 Погода\n" +
       line("Сьогодні", daily, 0) +
       "\n" +
       line("Завтра", daily, 1)
-    )
+
+    cache.set(key, { at: Date.now(), text })
+    return text
   } catch (error) {
     console.error("[weather] error:", error)
     return ""

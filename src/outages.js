@@ -1,4 +1,8 @@
 import sharp from "sharp"
+import crypto from "node:crypto"
+import { slotsToIntervals } from "./schedule.js"
+
+const API_BASE = "https://api-voe-poweron.inneti.net"
 
 // Геометрія виміряна на картинці 1750×2250. Інші розміри масштабуються.
 const REF_W = 1750
@@ -9,10 +13,7 @@ const ROW_H = 60 // висота рядка (підчерги)
 const TABLE_TOPS = [420, 1311] // верх 1-го рядка: 00–12 та 12–24
 const DARK_LIMIT = 150 // яскравість < 150 => світла немає
 
-const pad = (n) => String(n).padStart(2, "0")
-const fmt = (min) => `${pad(Math.floor(min / 60) % 24)}:${pad(min % 60)}`
-
-// Повертає 48 слотів по 30 хв: true = відключення
+// 48 слотів по 30 хв: true = відключення
 export async function getSlots(imageBuffer, queue) {
   const [q, s] = queue.split(".").map(Number)
   const rowIndex = (q - 1) * 2 + (s - 1)
@@ -41,41 +42,74 @@ export async function getSlots(imageBuffer, queue) {
   return slots
 }
 
-// Зливає сусідні слоти в інтервали [початок, кінець] у хвилинах
-export function slotsToIntervals(slots) {
-  const result = []
-  let start = null
+// ---- завантаження графіків з кешем ----
 
-  slots.forEach((off, i) => {
-    if (off && start === null) start = i * 30
-    if (!off && start !== null) {
-      result.push([start, i * 30])
-      start = null
+let cache = { at: 0, days: null }
+let inflight = null
+
+async function refresh() {
+  const url = new URL("/api/options", API_BASE)
+  url.searchParams.append("option_key[]", "pw_gpv_image_today")
+  url.searchParams.append("option_key[]", "pw_gpv_image_tomorrow")
+
+  const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+
+  const data = await res.json()
+  const options = data["hydra:member"] || []
+  const days = {}
+
+  for (const [day, key] of [
+    ["today", "pw_gpv_image_today"],
+    ["tomorrow", "pw_gpv_image_tomorrow"],
+  ]) {
+    const item = options.find((o) => o.option_key === key)
+    if (!item?.value) {
+      days[day] = null
+      continue
     }
-  })
 
-  if (start !== null) result.push([start, 48 * 30])
-  return result
+    const imgUrl = new URL(item.value, API_BASE).toString()
+    const r = await fetch(imgUrl, { signal: AbortSignal.timeout(15000) })
+    if (!r.ok) throw new Error(`Image error: ${r.status}`)
+
+    const buffer = Buffer.from(await r.arrayBuffer())
+    days[day] = {
+      url: imgUrl,
+      buffer,
+      hash: crypto.createHash("sha1").update(buffer).digest("hex"),
+    }
+  }
+
+  cache = { at: Date.now(), days }
 }
 
-export async function getOutages(imageUrl, queue) {
-  const response = await fetch(imageUrl)
-  if (!response.ok) throw new Error(`Image error: ${response.status}`)
-
-  const buffer = Buffer.from(await response.arrayBuffer())
-  const slots = await getSlots(buffer, queue)
-  const intervals = slotsToIntervals(slots)
-  const totalMin = intervals.reduce((sum, [a, b]) => sum + (b - a), 0)
-
-  return { intervals, totalHours: totalMin / 60 }
+async function loadDay(day, ttl) {
+  if (!cache.days || Date.now() - cache.at >= ttl) {
+    if (!inflight) inflight = refresh().finally(() => (inflight = null))
+    await inflight
+  }
+  return cache.days[day]
 }
 
-export function formatOutages({ intervals, totalHours }) {
-  if (!intervals.length) return "✅ Відключень не заплановано"
+const memo = new Map()
 
-  const lines = intervals.map(
-    ([a, b]) => `🔴 ${fmt(a)} – ${b === 1440 ? "24:00" : fmt(b)}`
-  )
+// { slots, intervals, totalHours, url } або null, якщо графік не опублікований
+export async function getSchedule(day, queue, ttl = 60_000) {
+  const img = await loadDay(day, ttl)
+  if (!img) return null
 
-  return lines.join("\n") + `\n\nРазом без світла: ${totalHours} год`
+  const key = img.hash + queue
+  let r = memo.get(key)
+
+  if (!r) {
+    const slots = await getSlots(img.buffer, queue)
+    const intervals = slotsToIntervals(slots)
+    const minutes = intervals.reduce((sum, [a, b]) => sum + (b - a), 0)
+    r = { slots, intervals, totalHours: minutes / 60 }
+    if (memo.size > 40) memo.clear()
+    memo.set(key, r)
+  }
+
+  return { ...r, url: img.url }
 }

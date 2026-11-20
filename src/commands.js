@@ -1,211 +1,289 @@
 import { InlineKeyboard } from "grammy"
-import { getOutages, formatOutages } from "./outages.js"
+import { villages, villageIds } from "./villages.js"
+import { getSchedule } from "./outages.js"
 import { getWeatherText } from "./weather.js"
-
-const villages = {
-  dmytrivka: { name: "Дмитрівка", queue: "5.2", lat: 50.91, lon: 25.27 },
-  pozharky: { name: "Пожарки", queue: "1.1", lat: 50.91, lon: 25.27 },
-  rozhyshche: {
-    name: "Рожище, вул. Промислова, 89",
-    queue: "5.2",
-    lat: 50.91,
-    lon: 25.27,
-  },
-}
-
-const API_BASE = "https://api-voe-poweron.inneti.net"
+import {
+  buildDayMessage, buildNowMessage, buildStatsMessage, settingsText,
+} from "./messages.js"
+import {
+  ensureChat, getChat, subscribe, unsubscribe, save, recordStats, getStats,
+} from "./store.js"
+import { kyivNow, fmtTime } from "./schedule.js"
+import { safeSend } from "./send.js"
+import { startScheduler } from "./scheduler.js"
 
 const officialUrl =
   "https://energy.volyn.ua/spozhyvacham/perervy-u-elektropostachanni/hrafik-vidkliuchen/pagephp.php"
 
-function mainMenu() {
-  return new InlineKeyboard()
-    .text("🏡 Дмитрівка", "village:dmytrivka")
-    .row()
-    .text("🏡 Пожарки", "village:pozharky")
-    .row()
-    .text("🏠 Рожище", "village:rozhyshche")
-}
+const LEADS = [15, 30, 60]
+const MORNINGS = [360, 420, 480, 540]
 
-function dateMenu(id) {
-  return new InlineKeyboard()
-    .text("📅 Сьогодні", `graph:${id}:today`)
-    .text("📅 Завтра", `graph:${id}:tomorrow`)
-    .row()
-    .text("⬅️ Інший населений пункт", "back")
-}
+const subscribedIds = (chatId) => getChat(chatId)?.villages || []
+const onOff = (v) => (v ? "так" : "ні")
 
-async function getGraphImage(day) {
-  const key =
-    day === "today"
-      ? "pw_gpv_image_today"
-      : "pw_gpv_image_tomorrow"
+function mainMenu(chatId) {
+  const subs = subscribedIds(chatId)
+  const kb = new InlineKeyboard()
 
-  const url = new URL("/api/options", API_BASE)
-
-  url.searchParams.append("option_key[]", "pw_gpv_image_today")
-  url.searchParams.append("option_key[]", "pw_gpv_image_tomorrow")
-
-  const response = await fetch(url)
-
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status}`)
+  for (const id of villageIds) {
+    kb.text(`${subs.includes(id) ? "🔔" : "🏡"} ${villages[id].short}`, `v:${id}`).row()
   }
 
-  const data = await response.json()
-  const options = data["hydra:member"] || []
-
-  const item = options.find(
-    (option) => option.option_key === key
-  )
-
-  if (!item?.value) return null
-
-  return new URL(item.value, API_BASE).toString()
+  return kb.text("⚙️ Налаштування", "st:open")
 }
 
-const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
-
-const jokes = {
-  none: [
-    "Світло сьогодні без вихідних. Можна смажити, прати і пилососити одночасно 😎",
-    "Енергетики сьогодні в доброму гуморі. Користуйтеся, поки дають!",
-  ],
-  light: [
-    "Відключення невеликі, тож це не криза, а коротка медитація без розетки 🧘",
-    "Трохи посидимо при свічках, романтика ж. Головне, щоб Wi-Fi не образився 🕯️",
-  ],
-  medium: [
-    "Світло сьогодні як гість: приходить і йде, коли захоче. Тож заряджайте все, що заряджається 🔋",
-    "Пральну машину запускаємо, поки є світло. Потім вона теж піде в тінь 🧺",
-  ],
-  heavy: [
-    "Сьогодні світла небагато, зате буде що розповісти онукам 📖",
-    "Дістаємо павербанки, ліхтарики й настільні ігри. Вечір обіцяє бути живим 🎲",
-  ],
+function villageMenu(id, subscribed) {
+  return new InlineKeyboard()
+    .text("📅 Сьогодні", `d:${id}:today`)
+    .text("📅 Завтра", `d:${id}:tomorrow`)
+    .row()
+    .text("⚡ Що зараз?", `n:${id}`)
+    .text("📊 Статистика", `s:${id}`)
+    .row()
+    .text(
+      subscribed ? "🔕 Відписатися від сповіщень" : "🔔 Підписатися на сповіщення",
+      `sub:${id}`
+    )
+    .row()
+    .text("⬅️ Назад", "back")
 }
 
-function buildMessage(village, dayName, outages, weather) {
-  const when = dayName === "СЬОГОДНІ" ? "сьогодні" : "завтра"
-  const h = outages.totalHours
+function settingsMenu(chat) {
+  return new InlineKeyboard()
+    .text(`${chat.notify ? "🔔" : "🔕"} Попередження про відключення: ${onOff(chat.notify)}`, "st:notify").row()
+    .text(`⏱ Попереджати за: ${chat.lead} хв`, "st:lead").row()
+    .text(`${chat.morning ? "🌅" : "🚫"} Ранковий дайджест: ${onOff(chat.morning)}`, "st:morning").row()
+    .text(`🕖 Час дайджесту: ${fmtTime(chat.morningTime)}`, "st:mtime").row()
+    .text(`📣 Новий/змінений графік: ${onOff(chat.alerts)}`, "st:alerts").row()
+    .text(`🌙 Тиха ніч (без звуку 23:00–07:00): ${onOff(chat.quiet)}`, "st:quiet").row()
+    .text("⬅️ Назад", "back")
+}
 
-  const joke =
-    h === 0 ? pick(jokes.none)
-    : h <= 4 ? pick(jokes.light)
-    : h <= 7 ? pick(jokes.medium)
-    : pick(jokes.heavy)
+const settingsMessage = (chat) =>
+  settingsText(chat, chat.villages.map((id) => villages[id].short))
 
-  return (
-    `👋 Любі гості, дорога родино!\n\n` +
-    `Графік на ${when} для «${village.name}» (черга ${village.queue}) такий:\n\n` +
-    `${formatOutages(outages)}\n\n` +
-    `${joke}\n\n` +
-    (weather ? `${weather}\n\n` : "") +
-    "ℹ️ Фактичний час перемикання може відрізнятися."
-  )
+function retryMenu(data) {
+  return new InlineKeyboard()
+    .url("🌐 Сайт Волиньобленерго", officialUrl)
+    .row()
+    .text("🔄 Спробувати ще раз", data)
+    .row()
+    .text("⬅️ Назад", "back")
+}
+
+async function showDay(ctx, id, day) {
+  const v = villages[id]
+  const subscribed = subscribedIds(ctx.chat.id).includes(id)
+
+  try {
+    const sched = await getSchedule(day, v.queue)
+
+    if (!sched) {
+      await ctx.reply(
+        `📍 ${v.name}\n🔢 Черга: ${v.queue}\n\nℹ️ Графік ${day === "today" ? "на сьогодні" : "на завтра"} ще не опублікований.`,
+        { reply_markup: villageMenu(id, subscribed) }
+      )
+      return
+    }
+
+    if (day === "today") recordStats(v.queue, kyivNow().dayNum, sched.totalHours)
+
+    const weather = await getWeatherText(v.lat, v.lon)
+    await safeSend(ctx.api, ctx.chat.id, buildDayMessage({ village: v, day, sched, weather }), {
+      photoUrl: sched.url,
+      extra: { reply_markup: villageMenu(id, subscribed) },
+    })
+  } catch (error) {
+    console.error("[day] error:", error)
+    await ctx.reply("⚠️ Не вдалося завантажити графік.", {
+      reply_markup: retryMenu(`d:${id}:${day}`),
+    })
+  }
+}
+
+async function showNow(ctx, id) {
+  const v = villages[id]
+
+  try {
+    const today = await getSchedule("today", v.queue)
+    if (!today) {
+      await ctx.reply("ℹ️ Графік на сьогодні ще не опублікований.")
+      return
+    }
+    const tomorrow = await getSchedule("tomorrow", v.queue)
+    await ctx.reply(buildNowMessage({ village: v, today, tomorrow }), {
+      reply_markup: villageMenu(id, subscribedIds(ctx.chat.id).includes(id)),
+    })
+  } catch (error) {
+    console.error("[now] error:", error)
+    await ctx.reply("⚠️ Не вдалося отримати дані.", { reply_markup: retryMenu(`n:${id}`) })
+  }
+}
+
+async function showStats(ctx, id) {
+  const v = villages[id]
+
+  try {
+    const today = await getSchedule("today", v.queue)
+    if (today) recordStats(v.queue, kyivNow().dayNum, today.totalHours)
+  } catch (error) {
+    console.error("[stats] error:", error)
+  }
+
+  await ctx.reply(buildStatsMessage({ village: v, stats: getStats(v.queue) }), {
+    reply_markup: villageMenu(id, subscribedIds(ctx.chat.id).includes(id)),
+  })
+}
+
+// для команд /today, /tomorrow, /now, /stats: працюють по підписаних селах
+async function forSubscribed(ctx, fn) {
+  const ids = subscribedIds(ctx.chat.id)
+
+  if (!ids.length) {
+    await ctx.reply("Спершу оберіть населений пункт і підпишіться:", {
+      reply_markup: mainMenu(ctx.chat.id),
+    })
+    return
+  }
+
+  for (const id of ids) await fn(ctx, id)
 }
 
 export function registerCommands(bot) {
-  bot.command("start", async (ctx) => {
-    await ctx.reply(
-      "⚡ ГРАФІК ВІДКЛЮЧЕНЬ СВІТЛА\n\nОберіть населений пункт:",
-      { reply_markup: mainMenu() }
-    )
-  })
-
-  bot.command("help", async (ctx) => {
-    await ctx.reply(
-      "⚡ Бот показує графіки відключень Волиньобленерго.\n\n" +
-      "/start — головне меню\n" +
-      "/ping — перевірка роботи"
-    )
-  })
-
-  bot.command("ping", (ctx) =>
-    ctx.reply("Бот працює ✅")
+  bot.command("start", (ctx) =>
+    ctx.reply("⚡ ГРАФІК ВІДКЛЮЧЕНЬ СВІТЛА\n\nОберіть населений пункт:", {
+      reply_markup: mainMenu(ctx.chat.id),
+    })
   )
 
-  bot.callbackQuery(
-    /^village:(dmytrivka|pozharky|rozhyshche)$/,
-    async (ctx) => {
-      await ctx.answerCallbackQuery()
+  bot.command("help", (ctx) =>
+    ctx.reply(
+      "⚡ Бот показує графіки відключень Волиньобленерго.\n\n" +
+        "/start — вибір населеного пункту\n" +
+        "/today — графік на сьогодні\n" +
+        "/tomorrow — графік на завтра\n" +
+        "/now — що зараз і що далі\n" +
+        "/stats — статистика за 7 днів\n" +
+        "/settings — налаштування сповіщень\n" +
+        "/ping — перевірка роботи\n\n" +
+        "Натисніть «🔔 Підписатися» в меню населеного пункту, і бот сам писатиме " +
+        "перед відключенням, зранку й коли графік зміниться."
+    )
+  )
 
-      const id = ctx.match[1]
-      const village = villages[id]
+  bot.command("ping", (ctx) => ctx.reply("Бот працює ✅"))
+  bot.command("today", (ctx) => forSubscribed(ctx, (c, id) => showDay(c, id, "today")))
+  bot.command("tomorrow", (ctx) => forSubscribed(ctx, (c, id) => showDay(c, id, "tomorrow")))
+  bot.command("now", (ctx) => forSubscribed(ctx, showNow))
+  bot.command("stats", (ctx) => forSubscribed(ctx, showStats))
 
+  bot.command("settings", (ctx) => {
+    const chat = ensureChat(ctx.chat.id)
+    return ctx.reply(settingsMessage(chat), { reply_markup: settingsMenu(chat) })
+  })
+
+  const known = (id) => !!villages[id]
+
+  bot.callbackQuery(/^v:(\w+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery()
+    const id = ctx.match[1]
+    if (!known(id)) return
+    const v = villages[id]
+
+    await ctx.reply(`📍 ${v.name}\n🔢 Ваша черга: ${v.queue}\n\nОберіть, що показати:`, {
+      reply_markup: villageMenu(id, subscribedIds(ctx.chat.id).includes(id)),
+    })
+  })
+
+  bot.callbackQuery(/^d:(\w+):(today|tomorrow)$/, async (ctx) => {
+    await ctx.answerCallbackQuery()
+    if (known(ctx.match[1])) await showDay(ctx, ctx.match[1], ctx.match[2])
+  })
+
+  bot.callbackQuery(/^n:(\w+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery()
+    if (known(ctx.match[1])) await showNow(ctx, ctx.match[1])
+  })
+
+  bot.callbackQuery(/^s:(\w+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery()
+    if (known(ctx.match[1])) await showStats(ctx, ctx.match[1])
+  })
+
+  bot.callbackQuery(/^sub:(\w+)$/, async (ctx) => {
+    const id = ctx.match[1]
+    if (!known(id)) return ctx.answerCallbackQuery()
+
+    const chat = ensureChat(ctx.chat.id)
+    const wasOn = chat.villages.includes(id)
+
+    if (wasOn) unsubscribe(chat, id)
+    else subscribe(chat, id)
+    save()
+
+    await ctx.answerCallbackQuery({ text: wasOn ? "Сповіщення вимкнено 🔕" : "Підписано 🔔" })
+    await ctx
+      .editMessageReplyMarkup({ reply_markup: villageMenu(id, !wasOn) })
+      .catch(() => {})
+
+    if (!wasOn) {
       await ctx.reply(
-        `📍 ${village.name}\n` +
-        `🔢 Ваша черга: ${village.queue}\n\n` +
-        "Оберіть день:",
-        { reply_markup: dateMenu(id) }
+        `🔔 Підписано: «${villages[id].name}».\n\n` +
+          "Тепер я писатиму:\n" +
+          `• за ${chat.lead} хв до відключення і коли світло має повернутися;\n` +
+          `• зранку (${fmtTime(chat.morningTime)}) з графіком і погодою;\n` +
+          "• коли з'явиться графік на завтра або він зміниться.\n\n" +
+          "Змінити це можна в /settings."
       )
     }
-  )
+  })
 
-  bot.callbackQuery(
-    /^graph:(dmytrivka|pozharky|rozhyshche):(today|tomorrow)$/,
-    async (ctx) => {
-      await ctx.answerCallbackQuery()
+  bot.callbackQuery(/^st:(\w+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery()
+    const chat = ensureChat(ctx.chat.id)
 
-      const id = ctx.match[1]
-      const day = ctx.match[2]
-      const village = villages[id]
-
-      const dayName =
-        day === "today" ? "СЬОГОДНІ" : "ЗАВТРА"
-
-      try {
-        const imageUrl = await getGraphImage(day)
-
-        if (!imageUrl) {
-          await ctx.reply(
-            `📍 ${village.name}\n` +
-            `🔢 Черга: ${village.queue}\n\n` +
-            "ℹ️ Графік ще не опублікований.",
-            { reply_markup: dateMenu(id) }
-          )
-          return
-        }
-
-        const outages = await getOutages(imageUrl, village.queue)
-        const weather = await getWeatherText(village.lat, village.lon)
-
-        await ctx.replyWithPhoto(imageUrl, {
-          caption: buildMessage(village, dayName, outages, weather),
-          reply_markup: dateMenu(id),
-        })
-      } catch (error) {
-        console.error("[graph] error:", error)
-
-        await ctx.reply(
-          "⚠️ Не вдалося завантажити графік.",
-          {
-            reply_markup: new InlineKeyboard()
-              .url("🌐 Сайт Волиньобленерго", officialUrl)
-              .row()
-              .text("🔄 Спробувати ще раз", `graph:${id}:${day}`)
-              .row()
-              .text("⬅️ Назад", "back"),
-          }
-        )
-      }
+    switch (ctx.match[1]) {
+      case "notify": chat.notify = !chat.notify; break
+      case "morning": chat.morning = !chat.morning; break
+      case "alerts": chat.alerts = !chat.alerts; break
+      case "quiet": chat.quiet = !chat.quiet; break
+      case "lead":
+        chat.lead = LEADS[(LEADS.indexOf(chat.lead) + 1) % LEADS.length]
+        break
+      case "mtime":
+        chat.morningTime = MORNINGS[(MORNINGS.indexOf(chat.morningTime) + 1) % MORNINGS.length]
+        break
     }
-  )
+    save()
+
+    const opts = { reply_markup: settingsMenu(chat) }
+    await ctx.editMessageText(settingsMessage(chat), opts).catch(async () => {
+      await ctx.reply(settingsMessage(chat), opts).catch(() => {})
+    })
+  })
 
   bot.callbackQuery("back", async (ctx) => {
     await ctx.answerCallbackQuery()
-
-    await ctx.reply(
-      "🏡 Оберіть населений пункт:",
-      { reply_markup: mainMenu() }
-    )
+    await ctx.reply("🏡 Оберіть населений пункт:", { reply_markup: mainMenu(ctx.chat.id) })
   })
 
   bot.on("message:text", async (ctx) => {
     if (!ctx.message.text.startsWith("/")) {
-      await ctx.reply(
-        "Щоб переглянути графік, натисніть /start"
-      )
+      await ctx.reply("Щоб переглянути графік, натисніть /start")
     }
   })
+
+  bot.api
+    .setMyCommands([
+      { command: "start", description: "Вибір населеного пункту" },
+      { command: "today", description: "Графік на сьогодні" },
+      { command: "tomorrow", description: "Графік на завтра" },
+      { command: "now", description: "Що зараз і що далі" },
+      { command: "stats", description: "Статистика за 7 днів" },
+      { command: "settings", description: "Налаштування сповіщень" },
+      { command: "help", description: "Допомога" },
+    ])
+    .catch(() => {})
+
+  startScheduler(bot.api)
 }
