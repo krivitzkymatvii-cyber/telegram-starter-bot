@@ -63,14 +63,11 @@ async function getGraphImage(day) {
     (option) => option.option_key === key
   )
 
-  if (!item?.value) {
-    return null
-  }
+  if (!item?.value) return null
 
   return new URL(item.value, API_BASE).toString()
 }
 
-// Діагностика кольорів графіка
 async function diagnoseGraph(day = "today") {
   const imageUrl = await getGraphImage(day)
 
@@ -85,6 +82,7 @@ async function diagnoseGraph(day = "today") {
   }
 
   const buffer = Buffer.from(await response.arrayBuffer())
+  const metadata = await sharp(buffer).metadata()
 
   const { data, info } = await sharp(buffer)
     .resize(80, 32, { fit: "fill" })
@@ -118,9 +116,9 @@ async function diagnoseGraph(day = "today") {
   }
 
   return (
-    `Розмір оригіналу: ${await sharp(buffer).metadata().then(m => m.width + " × " + m.height)}\n` +
-    "D — темно-синій\n" +
-    "L — світло-блакитний\n" +
+    `Розмір оригіналу: ${metadata.width} × ${metadata.height}\n` +
+    "D — темно-синій (відключення)\n" +
+    "L — світло-блакитний (світло є)\n" +
     ". — інші кольори\n\n" +
     result
   )
@@ -138,7 +136,7 @@ export function registerCommands(bot) {
     await ctx.reply(
       "⚡ Бот показує графіки відключень Волиньобленерго.\n\n" +
       "/start — головне меню\n" +
-      "/ping — перевірка роботи бота\n" +
+      "/ping — перевірка роботи\n" +
       "/diag — діагностика графіка"
     )
   })
@@ -147,21 +145,17 @@ export function registerCommands(bot) {
     ctx.reply("Бот працює ✅")
   )
 
-  // Команда діагностики
   bot.command("diag", async (ctx) => {
     await ctx.reply("🔍 Аналізую графік...")
 
     try {
       const result = await diagnoseGraph("today")
 
-      await ctx.reply(
-        "```text\n" + result + "\n```",
-        { parse_mode: "MarkdownV2" }
-      )
+      await ctx.reply("```text\n" + result + "\n```")
     } catch (error) {
       console.error("[diag] error:", error)
       await ctx.reply(
-        "⚠️ Помилка аналізу графіка. Перевірте журнал FadeHost."
+        "⚠️ Помилка аналізу. Перевірте журнали FadeHost."
       )
     }
   })
@@ -177,7 +171,7 @@ export function registerCommands(bot) {
       await ctx.reply(
         `📍 ${village.name}\n` +
         `🔢 Ваша черга: ${village.queue}\n\n` +
-        "Оберіть, за який день показати графік:",
+        "Оберіть день:",
         { reply_markup: dateMenu(id) }
       )
     }
@@ -202,27 +196,30 @@ export function registerCommands(bot) {
           await ctx.reply(
             `📍 ${village.name}\n` +
             `🔢 Черга: ${village.queue}\n\n` +
-            `ℹ️ Графік на ${dayName.toLowerCase()} ще не опублікований Волиньобленерго.`,
+            "ℹ️ Графік ще не опублікований.",
             { reply_markup: dateMenu(id) }
           )
           return
         }
+
+        await ctx.reply(
+          "ℹ️ Точні години відключень поки не розпізнані автоматично. Перегляньте офіційний графік нижче."
+        )
 
         await ctx.replyWithPhoto(imageUrl, {
           caption:
             `⚡ ГРАФІК ВІДКЛЮЧЕНЬ — ${dayName}\n\n` +
             `📍 ${village.name}\n` +
             `🔢 Ваша черга: ${village.queue}\n\n` +
-            "Знайдіть свою чергу на офіційному графіку.\n" +
-            "ℹ️ Фактичний час перемикання може відрізнятися.",
+            "D — відключення, L — світло є.\n" +
+            "Фактичний час перемикання може відрізнятися.",
           reply_markup: dateMenu(id),
         })
       } catch (error) {
         console.error("[graph] error:", error)
 
         await ctx.reply(
-          "⚠️ Не вдалося завантажити графік.\n" +
-          "Спробуйте ще раз трохи пізніше.",
+          "⚠️ Не вдалося завантажити графік.",
           {
             reply_markup: new InlineKeyboard()
               .url("🌐 Сайт Волиньобленерго", officialUrl)
