@@ -3,14 +3,8 @@ import { InlineKeyboard } from "grammy"
 import sharp from "sharp"
 
 const villages = {
-  dmytrivka: {
-    name: "Дмитрівка",
-    queue: "5.2",
-  },
-  pozharky: {
-    name: "Пожарки",
-    queue: "1.1",
-  },
+  dmytrivka: { name: "Дмитрівка", queue: "5.2" },
+  pozharky: { name: "Пожарки", queue: "1.1" },
   rozhyshche: {
     name: "Рожище, вул. Промислова, 89",
     queue: "5.2",
@@ -47,8 +41,14 @@ async function getGraphImage(day) {
 
   const url = new URL("/api/options", API_BASE)
 
-  url.searchParams.append("option_key[]", "pw_gpv_image_today")
-  url.searchParams.append("option_key[]", "pw_gpv_image_tomorrow")
+  url.searchParams.append(
+    "option_key[]",
+    "pw_gpv_image_today"
+  )
+  url.searchParams.append(
+    "option_key[]",
+    "pw_gpv_image_tomorrow"
+  )
 
   const response = await fetch(url)
 
@@ -68,6 +68,7 @@ async function getGraphImage(day) {
   return new URL(item.value, API_BASE).toString()
 }
 
+// Діагностика кольорів у зменшеному графіку
 async function diagnoseGraph(day = "today") {
   const imageUrl = await getGraphImage(day)
 
@@ -117,10 +118,72 @@ async function diagnoseGraph(day = "today") {
 
   return (
     `Розмір оригіналу: ${metadata.width} × ${metadata.height}\n` +
-    "D — темно-синій (відключення)\n" +
-    "L — світло-блакитний (світло є)\n" +
+    "D — темно-синій\n" +
+    "L — світло-блакитний\n" +
     ". — інші кольори\n\n" +
     result
+  )
+}
+
+// Сканування оригінального зображення по горизонтальних рядках
+async function scanGraph(day = "today") {
+  const imageUrl = await getGraphImage(day)
+
+  if (!imageUrl) {
+    return "Графік ще не опублікований."
+  }
+
+  const response = await fetch(imageUrl)
+
+  if (!response.ok) {
+    throw new Error("Не вдалося завантажити графік")
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer())
+
+  const { data, info } = await sharp(buffer)
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+
+  const width = info.width
+  const height = info.height
+  const channels = info.channels
+
+  const rows = []
+
+  for (let y = 0; y < height; y += 5) {
+    let dark = 0
+    let light = 0
+
+    for (let x = 0; x < width; x += 2) {
+      const i = (y * width + x) * channels
+
+      const r = data[i]
+      const g = data[i + 1]
+      const b = data[i + 2]
+
+      if (b > r * 1.15 && b > g * 0.95) {
+        const brightness =
+          0.2126 * r + 0.7152 * g + 0.0722 * b
+
+        if (brightness < 135) {
+          dark++
+        } else {
+          light++
+        }
+      }
+    }
+
+    if (dark + light > 10) {
+      rows.push(`Y=${y}: D=${dark}, L=${light}`)
+    }
+  }
+
+  return (
+    `Розмір: ${width} × ${height}\n` +
+    `Крок сканування: 5 пікселів\n\n` +
+    rows.join("\n")
   )
 }
 
@@ -137,7 +200,8 @@ export function registerCommands(bot) {
       "⚡ Бот показує графіки відключень Волиньобленерго.\n\n" +
       "/start — головне меню\n" +
       "/ping — перевірка роботи\n" +
-      "/diag — діагностика графіка"
+      "/diag — діагностика кольорів\n" +
+      "/scan — сканування оригіналу"
     )
   })
 
@@ -155,7 +219,25 @@ export function registerCommands(bot) {
     } catch (error) {
       console.error("[diag] error:", error)
       await ctx.reply(
-        "⚠️ Помилка аналізу. Перевірте журнали FadeHost."
+        "⚠️ Помилка аналізу графіка. Перевірте Logs FadeHost."
+      )
+    }
+  })
+
+  bot.command("scan", async (ctx) => {
+    await ctx.reply("🔍 Сканую оригінальний графік...")
+
+    try {
+      const result = await scanGraph("today")
+
+      for (let i = 0; i < result.length; i += 3500) {
+        await ctx.reply(result.slice(i, i + 3500))
+      }
+    } catch (error) {
+      console.error("[scan] error:", error)
+
+      await ctx.reply(
+        "⚠️ Помилка сканування. Перевірте Logs FadeHost."
       )
     }
   })
@@ -203,7 +285,7 @@ export function registerCommands(bot) {
         }
 
         await ctx.reply(
-          "ℹ️ Точні години відключень поки не розпізнані автоматично. Перегляньте офіційний графік нижче."
+          "ℹ️ Точні години відключень поки не розпізнані автоматично. Перегляньте офіційний графік."
         )
 
         await ctx.replyWithPhoto(imageUrl, {
