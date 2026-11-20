@@ -1,12 +1,15 @@
 import { InlineKeyboard } from "grammy"
 import { getOutages, formatOutages } from "./outages.js"
+import { getWeatherText } from "./weather.js"
 
 const villages = {
-  dmytrivka: { name: "Дмитрівка", queue: "5.2" },
-  pozharky: { name: "Пожарки", queue: "1.1" },
+  dmytrivka: { name: "Дмитрівка", queue: "5.2", lat: 50.91, lon: 25.27 },
+  pozharky: { name: "Пожарки", queue: "1.1", lat: 50.91, lon: 25.27 },
   rozhyshche: {
     name: "Рожище, вул. Промислова, 89",
     queue: "5.2",
+    lat: 50.91,
+    lon: 25.27,
   },
 }
 
@@ -82,7 +85,7 @@ const jokes = {
   ],
 }
 
-function buildMessage(village, dayName, outages) {
+function buildMessage(village, dayName, outages, weather) {
   const when = dayName === "СЬОГОДНІ" ? "сьогодні" : "завтра"
   const h = outages.totalHours
 
@@ -97,6 +100,7 @@ function buildMessage(village, dayName, outages) {
     `Графік на ${when} для «${village.name}» (черга ${village.queue}) такий:\n\n` +
     `${formatOutages(outages)}\n\n` +
     `${joke}\n\n` +
+    (weather ? `${weather}\n\n` : "") +
     "ℹ️ Фактичний час перемикання може відрізнятися."
   )
 }
@@ -164,9 +168,10 @@ export function registerCommands(bot) {
         }
 
         const outages = await getOutages(imageUrl, village.queue)
+        const weather = await getWeatherText(village.lat, village.lon)
 
         await ctx.replyWithPhoto(imageUrl, {
-          caption: buildMessage(village, dayName, outages),
+          caption: buildMessage(village, dayName, outages, weather),
           reply_markup: dateMenu(id),
         })
       } catch (error) {
