@@ -2,7 +2,9 @@
 import http from "node:http"
 import { Bot, webhookCallback } from "grammy"
 import { registerCommands } from "./src/commands.js"
-import { testViberConnection, postViberText } from "./viber.js"
+import {
+  testViberConnection, postViberText, setViberWebhook, startViberCallbackServer,
+} from "./viber.js"
 
 const token = process.env.TELEGRAM_BOT_TOKEN
 
@@ -33,6 +35,21 @@ function explain(err) {
 }
 
 async function main() {
+  // Viber webhook: без нього Viber відповідає webhookNotSet
+  const viberHook = (process.env.VIBER_WEBHOOK_URL || "").trim()
+  if (viberHook) {
+    try {
+      if (process.env.VIBER_SERVE === "1" && mode !== "webhook") {
+        startViberCallbackServer(http)
+        await new Promise((r) => setTimeout(r, 500))
+      }
+      await setViberWebhook(viberHook)
+      console.log("[viber] webhook set:", viberHook)
+    } catch (error) {
+      console.error("[viber] webhook error:", error.message)
+    }
+  }
+
   // Viber connection check
   try {
     const viber = await testViberConnection()

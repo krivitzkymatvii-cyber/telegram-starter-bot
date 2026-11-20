@@ -93,3 +93,25 @@ export async function postViberPicture(url) {
     media: url,
   })
 }
+
+// Viber не дає постити, поки не зареєстровано webhook (публічний https-URL).
+export async function setViberWebhook(url) {
+  return viberRequest("set_webhook", {
+    url,
+    event_types: ["failed"],
+    send_name: false,
+    send_photo: false,
+  })
+}
+
+// Мінімальний сервер, який відповідає 200 на запити Viber (потрібен для перевірки webhook)
+export function startViberCallbackServer(http) {
+  const port = Number(process.env.PORT || 3000)
+  http
+    .createServer((req, res) => {
+      req.resume()
+      res.writeHead(200, { "content-type": "text/plain" })
+      res.end("ok")
+    })
+    .listen(port, () => console.log(`[viber] callback server on port ${port}`))
+}
