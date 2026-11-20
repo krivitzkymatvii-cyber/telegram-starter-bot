@@ -33,19 +33,17 @@ async function viberRequest(method, payload = {}) {
 export async function getViberChannelInfo() {
   const data = await viberRequest("get_account_info")
 
-  const members = data.members || []
-
-  const admin = members.find(
+  const admin = (data.members || []).find(
     (member) => member.role === "superadmin"
   )
 
   if (!admin?.id) {
-    throw new Error("Не знайдено ID супер адміністратора")
+    throw new Error("Не вдалося отримати ID адміністратора")
   }
 
   return {
-    name: data.chat_hostname || data.name || "Viber Channel",
-    channelId: data.Id || data.id || "ID не повернуто",
+    name: data.chat_hostname,
+    channelId: data.Id,
     adminId: admin.id,
   }
 }
@@ -77,4 +75,21 @@ export async function testViberConnection() {
     channelId: info.channelId,
     adminId: info.adminId,
   }
+}
+
+export const viberEnabled = () =>
+  Boolean(process.env.VIBER_AUTH_TOKEN && process.env.VIBER_SUPERADMIN_ID)
+
+export async function postViberPicture(url) {
+  const adminId = process.env.VIBER_SUPERADMIN_ID
+
+  if (!adminId) {
+    throw new Error("VIBER_SUPERADMIN_ID не заданий")
+  }
+
+  return viberRequest("post", {
+    from: adminId,
+    type: "picture",
+    media: url,
+  })
 }
