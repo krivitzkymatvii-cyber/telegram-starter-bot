@@ -10,6 +10,10 @@ import { viberEnabled, postViberText, postViberPicture } from "../viber.js"
 
 const TTL = 5 * 60_000
 
+// Які населені пункти дублювати у Viber (через кому). За замовчуванням лише Дмитрівка.
+const viberVillages = (process.env.VIBER_VILLAGES || "dmytrivka")
+  .split(",").map((v) => v.trim()).filter(Boolean)
+
 const sigOf = (s) =>
   s.intervals.map(([a, b]) => `${a}-${b}`).join(",") || "none"
 
@@ -152,7 +156,7 @@ export function startScheduler(api) {
             })
 
             // дублюємо в Viber-канал
-            if (viberEnabled() && !viberSent.has(m.text)) {
+            if (viberEnabled() && viberVillages.includes(villageId) && !viberSent.has(m.text)) {
               viberSent.add(m.text)
               try {
                 await postViberText(m.text)
