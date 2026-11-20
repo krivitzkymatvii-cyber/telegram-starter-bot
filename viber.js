@@ -33,17 +33,19 @@ async function viberRequest(method, payload = {}) {
 export async function getViberChannelInfo() {
   const data = await viberRequest("get_account_info")
 
-  const admin = (data.members || []).find(
+  const members = data.members || []
+
+  const admin = members.find(
     (member) => member.role === "superadmin"
   )
 
   if (!admin?.id) {
-    throw new Error("Не вдалося отримати ID адміністратора")
+    throw new Error("Не знайдено ID супер адміністратора")
   }
 
   return {
-    name: data.chat_hostname,
-    channelId: data.Id,
+    name: data.chat_hostname || data.name || "Viber Channel",
+    channelId: data.Id || data.id || "ID не повернуто",
     adminId: admin.id,
   }
 }
