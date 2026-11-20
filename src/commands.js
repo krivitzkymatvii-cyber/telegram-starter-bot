@@ -1,5 +1,6 @@
 
 import { InlineKeyboard } from "grammy"
+import sharp from "sharp"
 
 const villages = {
   dmytrivka: {
@@ -69,6 +70,62 @@ async function getGraphImage(day) {
   return new URL(item.value, API_BASE).toString()
 }
 
+// Діагностика кольорів графіка
+async function diagnoseGraph(day = "today") {
+  const imageUrl = await getGraphImage(day)
+
+  if (!imageUrl) {
+    return "Графік ще не опублікований."
+  }
+
+  const response = await fetch(imageUrl)
+
+  if (!response.ok) {
+    throw new Error("Не вдалося завантажити графік")
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer())
+
+  const { data, info } = await sharp(buffer)
+    .resize(80, 32, { fit: "fill" })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+
+  let result = ""
+
+  for (let y = 0; y < info.height; y++) {
+    let line = ""
+
+    for (let x = 0; x < info.width; x++) {
+      const i = (y * info.width + x) * 3
+
+      const r = data[i]
+      const g = data[i + 1]
+      const b = data[i + 2]
+
+      if (b > r * 1.15 && b > g * 0.95) {
+        const brightness =
+          0.2126 * r + 0.7152 * g + 0.0722 * b
+
+        line += brightness < 135 ? "D" : "L"
+      } else {
+        line += "."
+      }
+    }
+
+    result += line + "\n"
+  }
+
+  return (
+    `Розмір оригіналу: ${await sharp(buffer).metadata().then(m => m.width + " × " + m.height)}\n` +
+    "D — темно-синій\n" +
+    "L — світло-блакитний\n" +
+    ". — інші кольори\n\n" +
+    result
+  )
+}
+
 export function registerCommands(bot) {
   bot.command("start", async (ctx) => {
     await ctx.reply(
@@ -81,13 +138,33 @@ export function registerCommands(bot) {
     await ctx.reply(
       "⚡ Бот показує графіки відключень Волиньобленерго.\n\n" +
       "/start — головне меню\n" +
-      "/ping — перевірка роботи бота"
+      "/ping — перевірка роботи бота\n" +
+      "/diag — діагностика графіка"
     )
   })
 
   bot.command("ping", (ctx) =>
     ctx.reply("Бот працює ✅")
   )
+
+  // Команда діагностики
+  bot.command("diag", async (ctx) => {
+    await ctx.reply("🔍 Аналізую графік...")
+
+    try {
+      const result = await diagnoseGraph("today")
+
+      await ctx.reply(
+        "```text\n" + result + "\n```",
+        { parse_mode: "MarkdownV2" }
+      )
+    } catch (error) {
+      console.error("[diag] error:", error)
+      await ctx.reply(
+        "⚠️ Помилка аналізу графіка. Перевірте журнал FadeHost."
+      )
+    }
+  })
 
   bot.callbackQuery(
     /^village:(dmytrivka|pozharky|rozhyshche)$/,
