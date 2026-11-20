@@ -150,6 +150,19 @@ async function forSubscribed(ctx, fn) {
 }
 
 export function registerCommands(bot) {
+  // Застарілі кнопки (після перезапуску бота) не мають ламати обробку
+  bot.use(async (ctx, next) => {
+    if (ctx.callbackQuery) {
+      const orig = ctx.answerCallbackQuery.bind(ctx)
+      ctx.answerCallbackQuery = (...args) =>
+        orig(...args).catch((e) => {
+          if (!/query is too old|query ID is invalid/i.test(e?.description || "")) throw e
+          return true
+        })
+    }
+    await next()
+  })
+
   bot.command("start", (ctx) =>
     ctx.reply("⚡ ГРАФІК ВІДКЛЮЧЕНЬ СВІТЛА\n\nОберіть населений пункт:", {
       reply_markup: mainMenu(ctx.chat.id),
