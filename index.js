@@ -2,7 +2,7 @@
 import http from "node:http"
 import { Bot, webhookCallback } from "grammy"
 import { registerCommands } from "./src/commands.js"
-import { testViberConnection } from "./viber.js"
+import { testViberConnection, postViberText } from "./viber.js"
 
 const token = process.env.TELEGRAM_BOT_TOKEN
 
@@ -46,6 +46,16 @@ async function main() {
     }
   } catch (error) {
     console.error("[viber] connection error:", error.message)
+  }
+
+  // Пробне повідомлення: задайте VIBER_TEST=1, перезапустіть, потім приберіть змінну
+  if (process.env.VIBER_TEST === "1") {
+    try {
+      await postViberText("✅ Тест: бот підключений до Viber-каналу")
+      console.log("[viber] test message sent")
+    } catch (error) {
+      console.error("[viber] test send error:", error.message)
+    }
   }
 
   let me
