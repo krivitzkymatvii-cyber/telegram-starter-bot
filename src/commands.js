@@ -1,6 +1,5 @@
-
 import { InlineKeyboard } from "grammy"
-import sharp from "sharp"
+import { getOutages, formatOutages } from "./outages.js"
 
 const villages = {
   dmytrivka: { name: "Дмитрівка", queue: "5.2" },
@@ -62,150 +61,6 @@ async function getGraphImage(day) {
   return new URL(item.value, API_BASE).toString()
 }
 
-// Діагностика кольорів у зменшеному графіку
-async function diagnoseGraph(day = "today") {
-  const imageUrl = await getGraphImage(day)
-
-  if (!imageUrl) {
-    return "Графік ще не опублікований."
-  }
-
-  const response = await fetch(imageUrl)
-
-  if (!response.ok) {
-    throw new Error("Не вдалося завантажити графік")
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer())
-  const metadata = await sharp(buffer).metadata()
-
-  const { data, info } = await sharp(buffer)
-    .resize(80, 32, { fit: "fill" })
-    .removeAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true })
-
-  let result = ""
-
-  for (let y = 0; y < info.height; y++) {
-    let line = ""
-
-    for (let x = 0; x < info.width; x++) {
-      const i = (y * info.width + x) * 3
-
-      const r = data[i]
-      const g = data[i + 1]
-      const b = data[i + 2]
-
-      if (b > r * 1.15 && b > g * 0.95) {
-        const brightness =
-          0.2126 * r + 0.7152 * g + 0.0722 * b
-
-        line += brightness < 135 ? "D" : "L"
-      } else {
-        line += "."
-      }
-    }
-
-    result += line + "\n"
-  }
-
-  return (
-    `Розмір оригіналу: ${metadata.width} × ${metadata.height}\n` +
-    "D — темно-синій\n" +
-    "L — світло-блакитний\n" +
-    ". — інші кольори\n\n" +
-    result
-  )
-}
-
-// Сканування горизонтальних відрізків за координатами X
-async function scanGraph(day = "today") {
-  const imageUrl = await getGraphImage(day)
-
-  if (!imageUrl) {
-    return "Графік ще не опублікований."
-  }
-
-  const response = await fetch(imageUrl)
-
-  if (!response.ok) {
-    throw new Error("Не вдалося завантажити графік")
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer())
-
-  const { data, info } = await sharp(buffer)
-    .removeAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true })
-
-  const width = info.width
-  const height = info.height
-  const channels = info.channels
-
- const rows = [
-  1900, 1910, 1920, 1930, 1940,
-  1950, 1960, 1970, 1980, 1990,
-  2000, 2010, 2020, 2030, 2040
-]
-
-
-  let result = `Розмір: ${width} × ${height}\n`
-
-  for (const y of rows) {
-    if (y >= height) continue
-
-    const runs = []
-    let current = null
-    let start = 0
-
-    for (let x = 0; x < width; x += 2) {
-      const i = (y * width + x) * channels
-
-      const r = data[i]
-      const g = data[i + 1]
-      const b = data[i + 2]
-
-      let color = "."
-
-      if (b > r * 1.15 && b > g * 0.95) {
-        const brightness =
-          0.2126 * r + 0.7152 * g + 0.0722 * b
-
-        color = brightness < 135 ? "D" : "L"
-      }
-
-      if (color !== current) {
-        if (
-          current &&
-          current !== "." &&
-          x - start >= 8
-        ) {
-          runs.push(`${current}:${start}-${x}`)
-        }
-
-        current = color
-        start = x
-      }
-    }
-
-    if (
-      current &&
-      current !== "." &&
-      width - start >= 8
-    ) {
-      runs.push(`${current}:${start}-${width}`)
-    }
-
-    result += `\nY=${y}\n`
-    result += runs.join(" | ") || "Кольори не знайдені"
-    result += "\n"
-  }
-
-  return result
-}
-
 export function registerCommands(bot) {
   bot.command("start", async (ctx) => {
     await ctx.reply(
@@ -218,48 +73,13 @@ export function registerCommands(bot) {
     await ctx.reply(
       "⚡ Бот показує графіки відключень Волиньобленерго.\n\n" +
       "/start — головне меню\n" +
-      "/ping — перевірка роботи\n" +
-      "/diag — діагностика кольорів\n" +
-      "/scan — сканування графіка"
+      "/ping — перевірка роботи"
     )
   })
 
   bot.command("ping", (ctx) =>
     ctx.reply("Бот працює ✅")
   )
-
-  bot.command("diag", async (ctx) => {
-    await ctx.reply("🔍 Аналізую графік...")
-
-    try {
-      const result = await diagnoseGraph("today")
-      await ctx.reply("```text\n" + result + "\n```")
-    } catch (error) {
-      console.error("[diag] error:", error)
-
-      await ctx.reply(
-        "⚠️ Помилка аналізу графіка. Перевірте Logs FadeHost."
-      )
-    }
-  })
-
-  bot.command("scan", async (ctx) => {
-    await ctx.reply("🔍 Сканую горизонтальні відрізки графіка...")
-
-    try {
-      const result = await scanGraph("today")
-
-      for (let i = 0; i < result.length; i += 3500) {
-        await ctx.reply(result.slice(i, i + 3500))
-      }
-    } catch (error) {
-      console.error("[scan] error:", error)
-
-      await ctx.reply(
-        "⚠️ Помилка сканування. Перевірте Logs FadeHost."
-      )
-    }
-  })
 
   bot.callbackQuery(
     /^village:(dmytrivka|pozharky|rozhyshche)$/,
@@ -303,17 +123,15 @@ export function registerCommands(bot) {
           return
         }
 
-        await ctx.reply(
-          "ℹ️ Точні години відключень поки не розпізнані автоматично. Перегляньте офіційний графік."
-        )
+        const outages = await getOutages(imageUrl, village.queue)
 
         await ctx.replyWithPhoto(imageUrl, {
           caption:
             `⚡ ГРАФІК ВІДКЛЮЧЕНЬ — ${dayName}\n\n` +
             `📍 ${village.name}\n` +
-            `🔢 Ваша черга: ${village.queue}\n\n` +
-            "D — відключення, L — світло є.\n" +
-            "Фактичний час перемикання може відрізнятися.",
+            `🔢 Черга: ${village.queue}\n\n` +
+            formatOutages(outages) +
+            "\n\nФактичний час перемикання може відрізнятися.",
           reply_markup: dateMenu(id),
         })
       } catch (error) {
