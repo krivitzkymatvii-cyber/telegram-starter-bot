@@ -41,14 +41,8 @@ async function getGraphImage(day) {
 
   const url = new URL("/api/options", API_BASE)
 
-  url.searchParams.append(
-    "option_key[]",
-    "pw_gpv_image_today"
-  )
-  url.searchParams.append(
-    "option_key[]",
-    "pw_gpv_image_tomorrow"
-  )
+  url.searchParams.append("option_key[]", "pw_gpv_image_today")
+  url.searchParams.append("option_key[]", "pw_gpv_image_tomorrow")
 
   const response = await fetch(url)
 
@@ -125,7 +119,7 @@ async function diagnoseGraph(day = "today") {
   )
 }
 
-// Сканування оригінального зображення по горизонтальних рядках
+// Сканування горизонтальних відрізків за координатами X
 async function scanGraph(day = "today") {
   const imageUrl = await getGraphImage(day)
 
@@ -150,11 +144,18 @@ async function scanGraph(day = "today") {
   const height = info.height
   const channels = info.channels
 
-  const rows = []
+  const rows = [
+    1320, 1440, 1560, 1800, 1920
+  ]
 
-  for (let y = 0; y < height; y += 5) {
-    let dark = 0
-    let light = 0
+  let result = `Розмір: ${width} × ${height}\n`
+
+  for (const y of rows) {
+    if (y >= height) continue
+
+    const runs = []
+    let current = null
+    let start = 0
 
     for (let x = 0; x < width; x += 2) {
       const i = (y * width + x) * channels
@@ -163,28 +164,43 @@ async function scanGraph(day = "today") {
       const g = data[i + 1]
       const b = data[i + 2]
 
+      let color = "."
+
       if (b > r * 1.15 && b > g * 0.95) {
         const brightness =
           0.2126 * r + 0.7152 * g + 0.0722 * b
 
-        if (brightness < 135) {
-          dark++
-        } else {
-          light++
+        color = brightness < 135 ? "D" : "L"
+      }
+
+      if (color !== current) {
+        if (
+          current &&
+          current !== "." &&
+          x - start >= 8
+        ) {
+          runs.push(`${current}:${start}-${x}`)
         }
+
+        current = color
+        start = x
       }
     }
 
-    if (dark + light > 10) {
-      rows.push(`Y=${y}: D=${dark}, L=${light}`)
+    if (
+      current &&
+      current !== "." &&
+      width - start >= 8
+    ) {
+      runs.push(`${current}:${start}-${width}`)
     }
+
+    result += `\nY=${y}\n`
+    result += runs.join(" | ") || "Кольори не знайдені"
+    result += "\n"
   }
 
-  return (
-    `Розмір: ${width} × ${height}\n` +
-    `Крок сканування: 5 пікселів\n\n` +
-    rows.join("\n")
-  )
+  return result
 }
 
 export function registerCommands(bot) {
@@ -201,7 +217,7 @@ export function registerCommands(bot) {
       "/start — головне меню\n" +
       "/ping — перевірка роботи\n" +
       "/diag — діагностика кольорів\n" +
-      "/scan — сканування оригіналу"
+      "/scan — сканування графіка"
     )
   })
 
@@ -214,10 +230,10 @@ export function registerCommands(bot) {
 
     try {
       const result = await diagnoseGraph("today")
-
       await ctx.reply("```text\n" + result + "\n```")
     } catch (error) {
       console.error("[diag] error:", error)
+
       await ctx.reply(
         "⚠️ Помилка аналізу графіка. Перевірте Logs FadeHost."
       )
@@ -225,7 +241,7 @@ export function registerCommands(bot) {
   })
 
   bot.command("scan", async (ctx) => {
-    await ctx.reply("🔍 Сканую оригінальний графік...")
+    await ctx.reply("🔍 Сканую горизонтальні відрізки графіка...")
 
     try {
       const result = await scanGraph("today")
