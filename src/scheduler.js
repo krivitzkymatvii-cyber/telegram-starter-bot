@@ -6,6 +6,7 @@ import {
 } from "./messages.js"
 import { getWeatherText } from "./weather.js"
 import { safeSend } from "./send.js"
+import { viberEnabled, postViberText, postViberPicture } from "../viber.js"
 
 const TTL = 5 * 60_000
 
@@ -114,6 +115,7 @@ export function startScheduler(api) {
       const { getSchedule } = await import("./outages.js")
       const now = kyivNow()
       const cache = new Map()
+      const viberSent = new Set() // одне й те саме повідомлення в Viber лише раз за прохід
 
       const sched = async (day, queue) => {
         const k = `${day}:${queue}`
@@ -148,6 +150,17 @@ export function startScheduler(api) {
               photoUrl: m.photoUrl,
               silent: m.silent,
             })
+
+            // дублюємо в Viber-канал
+            if (viberEnabled() && !viberSent.has(m.text)) {
+              viberSent.add(m.text)
+              try {
+                await postViberText(m.text)
+                if (m.photoUrl) await postViberPicture(m.photoUrl)
+              } catch (e) {
+                console.error("[viber] send error:", e?.message || e)
+              }
+            }
           }
         }
       }
