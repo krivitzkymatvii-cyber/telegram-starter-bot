@@ -1,4 +1,4 @@
-import { allChats, save, recordStats } from "./store.js"
+import { allChats, save, recordStats, ensureChat, subscribe, unsubscribe } from "./store.js"
 import { villages } from "./villages.js"
 import { kyivNow, DAY, slotsToIntervals, dueEvents } from "./schedule.js"
 import {
@@ -9,6 +9,9 @@ import { safeSend } from "./send.js"
 import { viberEnabled, postViberText, postViberPicture } from "../viber.js"
 
 const TTL = 5 * 60_000
+
+// Службовий «чат» для Viber: свої незалежні налаштування, не залежить від Telegram-чатів.
+const VIBER_KEY = "viber"
 
 // Які населені пункти дублювати у Viber (через кому). За замовчуванням лише Дмитрівка.
 const viberVillages = (process.env.VIBER_VILLAGES || "dmytrivka")
@@ -105,6 +108,33 @@ export async function processVillage({
   return msgs
 }
 
+// Підписки службового Viber-чату = VIBER_VILLAGES
+export function syncViberSubs(vChat, ids) {
+  for (const id of ids) {
+    if (!vChat.villages.includes(id)) subscribe(vChat, id)
+  }
+  for (const id of [...vChat.villages]) {
+    if (!ids.includes(id)) unsubscribe(vChat, id)
+  }
+}
+
+// Обробляє одне село для одного отримувача; deliver(m) відправляє повідомлення
+export async function runVillage({ chat, villageId, now, sched, deliver }) {
+  const village = villages[villageId]
+  if (!village || !chat.subs?.[villageId]) return
+
+  const today = await sched("today", village.queue)
+  const tomorrow = await sched("tomorrow", village.queue)
+  if (today) recordStats(village.queue, now.dayNum, today.totalHours)
+
+  const msgs = await processVillage({
+    chat, villageId, village, today, tomorrow, now,
+    getWeather: (v) => getWeatherText(v.lat, v.lon),
+  })
+
+  for (const m of msgs) await deliver(m)
+}
+
 export function startScheduler(api) {
   let running = false
 
@@ -113,13 +143,13 @@ export function startScheduler(api) {
     running = true
 
     try {
-      const chats = allChats()
-      if (!chats.length) return
+      const hasViber = viberEnabled() && viberVillages.length > 0
+      const telegramChats = allChats().filter(([id]) => id !== VIBER_KEY)
+      if (!telegramChats.length && !hasViber) return
 
       const { getSchedule } = await import("./outages.js")
       const now = kyivNow()
       const cache = new Map()
-      const viberSent = new Set() // одне й те саме повідомлення в Viber лише раз за прохід
 
       const sched = async (day, queue) => {
         const k = `${day}:${queue}`
@@ -135,37 +165,34 @@ export function startScheduler(api) {
         return cache.get(k)
       }
 
-      for (const [chatId, chat] of chats) {
+      // Telegram
+      for (const [chatId, chat] of telegramChats) {
         for (const villageId of chat.villages || []) {
-          const village = villages[villageId]
-          if (!village || !chat.subs?.[villageId]) continue
-
-          const today = await sched("today", village.queue)
-          const tomorrow = await sched("tomorrow", village.queue)
-          if (today) recordStats(village.queue, now.dayNum, today.totalHours)
-
-          const msgs = await processVillage({
-            chat, villageId, village, today, tomorrow, now,
-            getWeather: (v) => getWeatherText(v.lat, v.lon),
+          await runVillage({
+            chat, villageId, now, sched,
+            deliver: (m) =>
+              safeSend(api, chatId, m.text, { photoUrl: m.photoUrl, silent: m.silent }),
           })
+        }
+      }
 
-          for (const m of msgs) {
-            await safeSend(api, chatId, m.text, {
-              photoUrl: m.photoUrl,
-              silent: m.silent,
-            })
+      // Viber: окремий «чат», одне повідомлення на подію незалежно від кількості Telegram-чатів
+      if (hasViber) {
+        const vChat = ensureChat(VIBER_KEY)
+        syncViberSubs(vChat, viberVillages.filter((id) => villages[id]))
 
-            // дублюємо в Viber-канал
-            if (viberEnabled() && viberVillages.includes(villageId) && !viberSent.has(m.text)) {
-              viberSent.add(m.text)
+        for (const villageId of vChat.villages) {
+          await runVillage({
+            chat: vChat, villageId, now, sched,
+            deliver: async (m) => {
               try {
                 await postViberText(m.text)
                 if (m.photoUrl) await postViberPicture(m.photoUrl)
               } catch (e) {
                 console.error("[viber] send error:", e?.message || e)
               }
-            }
-          }
+            },
+          })
         }
       }
 
