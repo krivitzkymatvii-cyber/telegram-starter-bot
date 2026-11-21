@@ -7,8 +7,13 @@ import {
 } from "./messages.js"
 import {
   ensureChat, getChat, subscribe, unsubscribe, save, recordStats, getStats,
+  addReminder, listReminders, removeReminder, getAlarm,
 } from "./store.js"
-import { kyivNow, fmtTime } from "./schedule.js"
+import { parseRemind, fmtReminder, remindHelp } from "./remind.js"
+import { getRatesText } from "./rates.js"
+import { randomFun, sendFun } from "./fun.js"
+import { startExtras } from "./extras.js"
+import { kyivNow, fmtTime, fmtDur } from "./schedule.js"
 import { safeSend } from "./send.js"
 import { startScheduler } from "./scheduler.js"
 
@@ -29,7 +34,7 @@ function mainMenu(chatId) {
     kb.text(`${subs.includes(id) ? "🔔" : "🏡"} ${villages[id].short}`, `v:${id}`).row()
   }
 
-  return kb.text("⚙️ Налаштування", "st:open")
+  return kb.text("💵 Курс", "rates").text("⚙️ Налаштування", "st:open")
 }
 
 function villageMenu(id, subscribed) {
@@ -56,8 +61,29 @@ function settingsMenu(chat) {
     .text(`🕖 Час дайджесту: ${fmtTime(chat.morningTime)}`, "st:mtime").row()
     .text(`📣 Новий/змінений графік: ${onOff(chat.alerts)}`, "st:alerts").row()
     .text(`🌙 Тиха ніч (без звуку 23:00–07:00): ${onOff(chat.quiet)}`, "st:quiet").row()
+    .text("🧩 Додаткові функції", "st2:open").row()
     .text("⬅️ Назад", "back")
 }
+
+const FUNTIMES = [720, 900, 1080, 1200]
+
+function settingsMenu2(chat) {
+  return new InlineKeyboard()
+    .text(`${chat.alarm ? "🚨" : "🔕"} Повітряні тривоги: ${onOff(chat.alarm)}`, "st2:alarm").row()
+    .text(`🌦️ Погодні поради: ${onOff(chat.wtips)}`, "st2:wtips").row()
+    .text(`💵 Курс у ранковому повідомленні: ${onOff(chat.rates)}`, "st2:rates").row()
+    .text(`🎭 Щоденна родзинка: ${onOff(chat.fun)}`, "st2:fun").row()
+    .text(`🕕 Час родзинки: ${fmtTime(chat.funTime)}`, "st2:ftime").row()
+    .text("⬅️ Налаштування", "st:open")
+}
+
+const settingsMessage2 = () =>
+  "🧩 ДОДАТКОВІ ФУНКЦІЇ\n\n" +
+  "🚨 Тривоги: Волинська область" +
+  (process.env.ALERTS_TOKEN ? "" : " (ще не підключені: потрібен токен)") +
+  "\n🌦️ Поради: заморозки, вітер, гроза, ожеледиця тощо\n" +
+  "🎭 Родзинка: факт, жарт чи вікторина щодня\n\n" +
+  "⚠️ Бот не замінює офіційні сповіщення й сирени."
 
 const settingsMessage = (chat) =>
   settingsText(chat, chat.villages.map((id) => villages[id].short))
@@ -150,24 +176,13 @@ async function forSubscribed(ctx, fn) {
 }
 
 export function registerCommands(bot) {
-  // Застарілі кнопки (після перезапуску бота) не мають ламати обробку
-  bot.use(async (ctx, next) => {
-    if (ctx.callbackQuery) {
-      const orig = ctx.answerCallbackQuery.bind(ctx)
-      ctx.answerCallbackQuery = (...args) =>
-        orig(...args).catch((e) => {
-          if (!/query is too old|query ID is invalid/i.test(e?.description || "")) throw e
-          return true
-        })
-    }
-    await next()
-  })
-
-  bot.command("start", (ctx) =>
-    ctx.reply("⚡ ГРАФІК ВІДКЛЮЧЕНЬ СВІТЛА\n\nОберіть населений пункт:", {
+  bot.command("start", (ctx) => {
+    ensureChat(ctx.chat.id) // щоб доходили тривоги й поради
+    save()
+    return ctx.reply("⚡ ГРАФІК ВІДКЛЮЧЕНЬ СВІТЛА\n\nОберіть населений пункт:", {
       reply_markup: mainMenu(ctx.chat.id),
     })
-  )
+  })
 
   bot.command("help", (ctx) =>
     ctx.reply(
@@ -178,9 +193,15 @@ export function registerCommands(bot) {
         "/now — що зараз і що далі\n" +
         "/stats — статистика за 7 днів\n" +
         "/settings — налаштування сповіщень\n" +
+        "/remind — нагадування (приклади: /remind)\n" +
+        "/reminders — мої нагадування\n" +
+        "/rates — курс валют НБУ\n" +
+        "/alarm — стан повітряної тривоги\n" +
+        "/fact, /joke, /quiz — родзинка\n" +
         "/ping — перевірка роботи\n\n" +
         "Натисніть «🔔 Підписатися» в меню населеного пункту, і бот сам писатиме " +
-        "перед відключенням, зранку й коли графік зміниться."
+        "перед відключенням, зранку й коли графік зміниться.\n\n" +
+        "⚠️ Повітряні тривоги в боті допоміжні й не замінюють офіційні сповіщення та сирени."
     )
   )
 
@@ -193,6 +214,107 @@ export function registerCommands(bot) {
   bot.command("settings", (ctx) => {
     const chat = ensureChat(ctx.chat.id)
     return ctx.reply(settingsMessage(chat), { reply_markup: settingsMenu(chat) })
+  })
+
+
+  // ---- нагадування ----
+  bot.command("remind", async (ctx) => {
+    const text = (ctx.match || "").trim()
+    if (!text) return ctx.reply(remindHelp)
+
+    const res = parseRemind(text, kyivNow())
+    if (!res.ok) return ctx.reply(`⚠️ ${res.error}\n\n${remindHelp}`)
+
+    if (listReminders(ctx.chat.id).length >= 30) {
+      return ctx.reply("⚠️ Забагато нагадувань (максимум 30). Видаліть зайві: /reminders")
+    }
+
+    const id = addReminder({
+      chatId: ctx.chat.id, kind: res.kind, due: res.due, time: res.time,
+      text: res.text, by: ctx.from?.first_name || "",
+    })
+
+    await ctx.reply(`✅ Нагадування #${id}\n${res.whenLabel}\n${res.text}`)
+  })
+
+  async function showReminders(ctx) {
+    const list = listReminders(ctx.chat.id)
+    if (!list.length) return ctx.reply("Нагадувань немає. Створіть: /remind")
+
+    const kb = new InlineKeyboard()
+    list.forEach((r) => kb.text(`🗑 #${r.id}`, `rm:${r.id}`))
+
+    return ctx.reply(list.map(fmtReminder).join("\n\n"), { reply_markup: kb })
+  }
+
+  bot.command("reminders", showReminders)
+
+  bot.command("unremind", async (ctx) => {
+    const id = parseInt(ctx.match, 10)
+    if (!id) return ctx.reply("Вкажіть номер: /unremind 3")
+    await ctx.reply(removeReminder(id, ctx.chat.id) ? `🗑 Видалено #${id}` : "Не знайшов таке нагадування.")
+  })
+
+  bot.callbackQuery(/^rm:(\d+)$/, async (ctx) => {
+    const id = +ctx.match[1]
+    const ok = removeReminder(id, ctx.chat.id)
+    await ctx.answerCallbackQuery({ text: ok ? `Видалено #${id}` : "Уже видалено" })
+    if (ok) await showReminders(ctx)
+  })
+
+  // ---- курс, тривога, родзинка ----
+  const sendRates = async (ctx) => {
+    try {
+      await ctx.reply(await getRatesText())
+    } catch (error) {
+      console.error("[rates] error:", error)
+      await ctx.reply("⚠️ Не вдалося отримати курс НБУ. Спробуйте пізніше.")
+    }
+  }
+
+  bot.command("rates", sendRates)
+  bot.callbackQuery("rates", async (ctx) => {
+    await ctx.answerCallbackQuery()
+    await sendRates(ctx)
+  })
+
+  bot.command("alarm", async (ctx) => {
+    if (!process.env.ALERTS_TOKEN) {
+      return ctx.reply("🚨 Тривоги ще не підключені (немає токена alerts.in.ua).")
+    }
+
+    const a = getAlarm()
+    await ctx.reply(
+      (a.active
+        ? `🚨 Зараз тривога (${a.level === "oblast" ? "уся область" : a.places.join(", ")}), триває ${fmtDur(Math.max(1, Math.round((Date.now() - a.since) / 60000)))}.`
+        : "✅ Зараз тривоги у Волинській області немає.") +
+        "\n\n⚠️ Не замінює офіційні сповіщення та сирени."
+    )
+  })
+
+  bot.command("fact", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("fact")))
+  bot.command("joke", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("joke")))
+  bot.command("quiz", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("quiz")))
+
+  bot.callbackQuery(/^st2:(\w+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery()
+    const chat = ensureChat(ctx.chat.id)
+
+    switch (ctx.match[1]) {
+      case "alarm": chat.alarm = !chat.alarm; break
+      case "wtips": chat.wtips = !chat.wtips; break
+      case "rates": chat.rates = !chat.rates; break
+      case "fun": chat.fun = !chat.fun; break
+      case "ftime":
+        chat.funTime = FUNTIMES[(FUNTIMES.indexOf(chat.funTime) + 1) % FUNTIMES.length]
+        break
+    }
+    save()
+
+    const opts = { reply_markup: settingsMenu2(chat) }
+    await ctx.editMessageText(settingsMessage2(), opts).catch(async () => {
+      await ctx.reply(settingsMessage2(), opts).catch(() => {})
+    })
   })
 
   const known = (id) => !!villages[id]
@@ -293,10 +415,18 @@ export function registerCommands(bot) {
       { command: "tomorrow", description: "Графік на завтра" },
       { command: "now", description: "Що зараз і що далі" },
       { command: "stats", description: "Статистика за 7 днів" },
+      { command: "remind", description: "Створити нагадування" },
+      { command: "reminders", description: "Мої нагадування" },
+      { command: "rates", description: "Курс валют НБУ" },
+      { command: "alarm", description: "Стан повітряної тривоги" },
+      { command: "fact", description: "Цікавий факт" },
+      { command: "joke", description: "Жарт" },
+      { command: "quiz", description: "Вікторина" },
       { command: "settings", description: "Налаштування сповіщень" },
       { command: "help", description: "Допомога" },
     ])
     .catch(() => {})
 
   startScheduler(bot.api)
+  startExtras(bot.api)
 }

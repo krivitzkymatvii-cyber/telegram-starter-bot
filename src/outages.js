@@ -1,6 +1,6 @@
 import sharp from "sharp"
 import crypto from "node:crypto"
-import { slotsToIntervals } from "./schedule.js"
+import { slotsToIntervals, kyivNow, createStaleState, fixStaleDays } from "./schedule.js"
 
 const API_BASE = "https://api-voe-poweron.inneti.net"
 
@@ -46,6 +46,7 @@ export async function getSlots(imageBuffer, queue) {
 
 let cache = { at: 0, days: null }
 let inflight = null
+const staleState = createStaleState()
 
 async function refresh() {
   const url = new URL("/api/options", API_BASE)
@@ -81,7 +82,7 @@ async function refresh() {
     }
   }
 
-  cache = { at: Date.now(), days }
+  cache = { at: Date.now(), days: fixStaleDays(days, kyivNow().dayNum, staleState) }
 }
 
 async function loadDay(day, ttl) {

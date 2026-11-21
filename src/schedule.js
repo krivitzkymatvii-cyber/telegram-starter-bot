@@ -124,3 +124,36 @@ export function dueEvents(intervals, nowMin, lead, knownLen) {
   }
   return events
 }
+
+// Після півночі ВОЕ деякий час віддає у «сьогодні» вчорашню картинку.
+// Така картинка має той самий хеш, що й «сьогодні» минулої доби.
+// Тоді беремо те, що вчора було «завтра». state: { lastToday, carried }
+export function createStaleState() {
+  return { lastToday: { dayNum: 0, hash: null }, carried: new Map() }
+}
+
+export function fixStaleDays(days, dayNum, state) {
+  const out = { ...days }
+
+  if (out.today) {
+    const stale =
+      state.lastToday.hash === out.today.hash && state.lastToday.dayNum < dayNum
+    if (stale) {
+      out.today = state.carried.get(dayNum) || null
+    } else {
+      state.lastToday = { dayNum, hash: out.today.hash }
+    }
+  }
+
+  if (out.tomorrow) {
+    // «завтра» збігається з тим, що вже є справжнім «сьогодні» => ще не оновили
+    if (state.carried.get(dayNum)?.hash === out.tomorrow.hash) {
+      out.tomorrow = null
+    } else {
+      state.carried.set(dayNum + 1, out.tomorrow)
+    }
+  }
+
+  for (const k of state.carried.keys()) if (k < dayNum) state.carried.delete(k)
+  return out
+}

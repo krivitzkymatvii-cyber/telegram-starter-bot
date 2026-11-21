@@ -6,7 +6,7 @@ import path from "node:path"
 const DIR = process.env.DATA_DIR || "./data"
 const FILE = path.join(DIR, "bot-data.json")
 
-let db = { chats: {}, stats: {} }
+let db = { chats: {}, stats: {}, reminders: [], nextId: 1, alarm: null, goverla: null }
 
 try {
   db = { ...db, ...JSON.parse(fs.readFileSync(FILE, "utf8")) }
@@ -32,6 +32,11 @@ export const defaults = {
   morningTime: 420, // 07:00
   alerts: true, // новий/змінений графік
   quiet: false, // вночі надсилати без звуку
+  alarm: true, // повітряні тривоги
+  wtips: true, // погодні поради
+  rates: false, // курс валют у ранковому повідомленні
+  fun: false, // щоденна родзинка (факт/жарт/вікторина)
+  funTime: 1080, // 18:00
 }
 
 export const getChat = (id) => db.chats[id]
@@ -68,3 +73,53 @@ export function recordStats(queue, dayNum, hours) {
 }
 
 export const getStats = (queue) => db.stats[queue] || {}
+
+// старі чати отримують значення нових налаштувань
+for (const chat of Object.values(db.chats)) {
+  for (const [k, v] of Object.entries(defaults)) {
+    if (chat[k] === undefined) chat[k] = v
+  }
+}
+
+// ---- нагадування ----
+export const allReminders = () => db.reminders
+export const listReminders = (chatId) =>
+  db.reminders.filter((r) => String(r.chatId) === String(chatId))
+
+export function addReminder(r) {
+  const id = db.nextId++
+  db.reminders.push({ id, last: 0, ...r })
+  save()
+  return id
+}
+
+export function removeReminder(id, chatId) {
+  const before = db.reminders.length
+  db.reminders = db.reminders.filter(
+    (r) => !(r.id === id && String(r.chatId) === String(chatId))
+  )
+  if (db.reminders.length !== before) save()
+  return db.reminders.length !== before
+}
+
+export function dropReminders(ids) {
+  db.reminders = db.reminders.filter((r) => !ids.includes(r.id))
+  save()
+}
+
+// ---- стан повітряної тривоги ----
+export const getAlarm = () =>
+  db.alarm || { active: false, level: null, since: null, places: [] }
+
+export function setAlarm(a) {
+  db.alarm = a
+  save()
+}
+
+// ---- останній і попередній курс «Говерла» (для стрілок ▲▼) ----
+export const getRatesState = () => db.goverla || { cur: null, prev: null }
+
+export function setRatesState(state) {
+  db.goverla = state
+  save()
+}

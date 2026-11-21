@@ -6,9 +6,20 @@ import {
 } from "./messages.js"
 import { getWeatherText } from "./weather.js"
 import { safeSend } from "./send.js"
+import { getRatesLine } from "./rates.js"
 import { viberEnabled, postViberText, postViberPicture } from "../viber.js"
 
-const TTL = 5 * 60_000
+const TTL = 2 * 60_000 // як часто перечитувати сайт ВОЕ
+const SEND_TIMEOUT = 30_000 // жодна відправка не може висіти довше
+const TICK_WATCHDOG = 3 * 60_000 // якщо перевірка «зависла», скидаємо її
+
+function withTimeout(promise, ms, label) {
+  let t
+  const timeout = new Promise((_, reject) => {
+    t = setTimeout(() => reject(new Error(`timeout: ${label}`)), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t))
+}
 
 // Службовий «чат» для Viber: свої незалежні налаштування, не залежить від Telegram-чатів.
 const VIBER_KEY = "viber"
@@ -129,18 +140,36 @@ export async function runVillage({ chat, villageId, now, sched, deliver }) {
 
   const msgs = await processVillage({
     chat, villageId, village, today, tomorrow, now,
-    getWeather: (v) => getWeatherText(v.lat, v.lon),
+    getWeather: async (v) => {
+      const w = await getWeatherText(v.lat, v.lon)
+      const r = chat.rates ? await getRatesLine() : ""
+      return [w, r].filter(Boolean).join("\n\n")
+    },
   })
 
-  for (const m of msgs) await deliver(m)
+  if (msgs.length) console.log(`[scheduler] ${villageId}: ${msgs.length} повідомл.`)
+  for (const m of msgs) {
+    try {
+      await withTimeout(deliver(m), SEND_TIMEOUT, "deliver")
+    } catch (e) {
+      console.error("[scheduler] deliver error:", e?.message || e)
+    }
+  }
 }
 
 export function startScheduler(api) {
   let running = false
+  let startedAt = 0
+  let ticks = 0
 
   async function tick() {
-    if (running) return
+    if (running) {
+      if (Date.now() - startedAt < TICK_WATCHDOG) return
+      console.error("[scheduler] попередня перевірка зависла, скидаю")
+    }
     running = true
+    startedAt = Date.now()
+    if (++ticks % 30 === 0) console.log("[scheduler] працює, перевірок:", ticks)
 
     try {
       const hasViber = viberEnabled() && viberVillages.length > 0
