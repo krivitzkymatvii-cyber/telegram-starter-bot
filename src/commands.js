@@ -13,6 +13,7 @@ import { parseRemind, fmtReminder, remindHelp } from "./remind.js"
 import { getRatesText } from "./rates.js"
 import { randomFun, sendFun } from "./fun.js"
 import { startExtras } from "./extras.js"
+import { registerMore } from "./more.js"
 import { kyivNow, fmtTime, fmtDur } from "./schedule.js"
 import { safeSend } from "./send.js"
 import { startScheduler } from "./scheduler.js"
@@ -176,6 +177,19 @@ async function forSubscribed(ctx, fn) {
 }
 
 export function registerCommands(bot) {
+  // Застарілі кнопки (після перезапуску бота) не мають ламати обробку
+  bot.use(async (ctx, next) => {
+    if (ctx.callbackQuery) {
+      const orig = ctx.answerCallbackQuery.bind(ctx)
+      ctx.answerCallbackQuery = (...args) =>
+        orig(...args).catch((e) => {
+          if (!/query is too old|query ID is invalid/i.test(e?.description || "")) throw e
+          return true
+        })
+    }
+    await next()
+  })
+
   bot.command("start", (ctx) => {
     ensureChat(ctx.chat.id) // щоб доходили тривоги й поради
     save()
@@ -192,6 +206,9 @@ export function registerCommands(bot) {
         "/tomorrow — графік на завтра\n" +
         "/now — що зараз і що далі\n" +
         "/stats — статистика за 7 днів\n" +
+        "/month — статистика за 30 днів\n" +
+        "/calendar — відключення в календар телефона\n" +
+        "/share — поділитися ботом\n" +
         "/settings — налаштування сповіщень\n" +
         "/remind — нагадування (приклади: /remind)\n" +
         "/reminders — мої нагадування\n" +
@@ -206,6 +223,7 @@ export function registerCommands(bot) {
   )
 
   bot.command("ping", (ctx) => ctx.reply("Бот працює ✅"))
+  registerMore(bot)
   bot.command("today", (ctx) => forSubscribed(ctx, (c, id) => showDay(c, id, "today")))
   bot.command("tomorrow", (ctx) => forSubscribed(ctx, (c, id) => showDay(c, id, "tomorrow")))
   bot.command("now", (ctx) => forSubscribed(ctx, showNow))
@@ -415,6 +433,9 @@ export function registerCommands(bot) {
       { command: "tomorrow", description: "Графік на завтра" },
       { command: "now", description: "Що зараз і що далі" },
       { command: "stats", description: "Статистика за 7 днів" },
+      { command: "month", description: "Статистика за 30 днів" },
+      { command: "calendar", description: "Відключення в календар" },
+      { command: "share", description: "Поділитися ботом" },
       { command: "remind", description: "Створити нагадування" },
       { command: "reminders", description: "Мої нагадування" },
       { command: "rates", description: "Курс валют НБУ" },
