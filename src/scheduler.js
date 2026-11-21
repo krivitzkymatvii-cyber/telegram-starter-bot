@@ -7,7 +7,8 @@ import {
 import { getWeatherText } from "./weather.js"
 import { safeSend } from "./send.js"
 import { getRatesLine } from "./rates.js"
-import { viberEnabled, postViberText, postViberPicture } from "../viber.js"
+import { vDay, vChanged, vBefore, vBack } from "./viberText.js"
+import { viberEnabled, postViberText } from "../viber.js"
 
 const TTL = 2 * 60_000 // як часто перечитувати сайт ВОЕ
 const SEND_TIMEOUT = 30_000 // жодна відправка не може висіти довше
@@ -69,12 +70,17 @@ export async function processVillage({
 
     if (prev === undefined) {
       if (off === 1) {
-        msgs.push({ text: buildPublished({ village, sched: s }), photoUrl: s.url })
+        msgs.push({
+          text: buildPublished({ village, sched: s }),
+          photoUrl: s.url,
+          v: vDay({ village, off: 1, intervals: s.intervals, published: true }),
+        })
       }
     } else if (prev !== sig) {
       msgs.push({
         text: buildChanged({ village, off, oldSig: prev, newSig: sig }),
         photoUrl: s.url,
+        v: vChanged({ village, off, oldSig: prev, newSig: sig }),
       })
     }
   }
@@ -92,10 +98,14 @@ export async function processVillage({
       chat.sent[key] = 1
 
       if (ev.type === "before") {
-        msgs.push({ text: buildBefore({ village, ev, nowMin: minutes }), silent })
+        msgs.push({
+          text: buildBefore({ village, ev, nowMin: minutes }),
+          silent,
+          v: vBefore({ village, ev, nowMin: minutes }),
+        })
       } else {
         const next = intervals.find(([a]) => a >= ev.e) || null
-        msgs.push({ text: buildBack({ village, ev, next }), silent })
+        msgs.push({ text: buildBack({ village, ev, next }), silent, v: vBack({ village, ev, next }) })
       }
     }
   }
@@ -112,6 +122,7 @@ export async function processVillage({
       msgs.push({
         text: buildDayMessage({ village, day: "today", sched: today, weather, morning: true }),
         photoUrl: today.url,
+        v: vDay({ village, off: 0, intervals: today.intervals }),
       })
     }
   }
@@ -215,8 +226,7 @@ export function startScheduler(api) {
             chat: vChat, villageId, now, sched,
             deliver: async (m) => {
               try {
-                await postViberText(m.text)
-                if (m.photoUrl) await postViberPicture(m.photoUrl)
+                await postViberText(m.v ?? m.text) // короткий текст, без картинок
               } catch (e) {
                 console.error("[viber] send error:", e?.message || e)
               }
