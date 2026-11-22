@@ -14,6 +14,8 @@ import { getRatesText } from "./rates.js"
 import { randomFun, sendFun } from "./fun.js"
 import { startExtras } from "./extras.js"
 import { registerMore } from "./more.js"
+import { historyFor } from "./dates.js"
+import { getNews, newsConfigured } from "./news.js"
 import { kyivNow, fmtTime, fmtDur } from "./schedule.js"
 import { safeSend } from "./send.js"
 import { startScheduler } from "./scheduler.js"
@@ -75,6 +77,8 @@ function settingsMenu2(chat) {
     .text(`💵 Курс у ранковому повідомленні: ${onOff(chat.rates)}`, "st2:rates").row()
     .text(`🎭 Щоденна родзинка: ${onOff(chat.fun)}`, "st2:fun").row()
     .text(`🕕 Час родзинки: ${fmtTime(chat.funTime)}`, "st2:ftime").row()
+    .text(`🎊 Привітання зі святами: ${onOff(chat.greet)}`, "st2:greet").row()
+    .text(`📜 Цього дня в історії: ${onOff(chat.history)}`, "st2:history").row()
     .text("⬅️ Налаштування", "st:open")
 }
 
@@ -83,7 +87,7 @@ const settingsMessage2 = () =>
   "🚨 Тривоги: Волинська область" +
   (process.env.ALERTS_TOKEN ? "" : " (ще не підключені: потрібен токен)") +
   "\n🌦️ Поради: заморозки, вітер, гроза, ожеледиця тощо\n" +
-  "🎭 Родзинка: факт, жарт чи вікторина щодня\n\n" +
+  "🎭 Родзинка: факт, жарт, вікторина, загадка чи прислів'я щодня\n\n" +
   "⚠️ Бот не замінює офіційні сповіщення й сирени."
 
 const settingsMessage = (chat) =>
@@ -214,7 +218,9 @@ export function registerCommands(bot) {
         "/reminders — мої нагадування\n" +
         "/rates — курс валют НБУ\n" +
         "/alarm — стан повітряної тривоги\n" +
-        "/fact, /joke, /quiz — родзинка\n" +
+        "/fact, /joke, /quiz, /riddle, /proverb — родзинка\n" +
+        "/history — цього дня в історії\n" +
+        "/news — останні новини\n" +
         "/ping — перевірка роботи\n\n" +
         "Натисніть «🔔 Підписатися» в меню населеного пункту, і бот сам писатиме " +
         "перед відключенням, зранку й коли графік зміниться.\n\n" +
@@ -312,7 +318,29 @@ export function registerCommands(bot) {
 
   bot.command("fact", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("fact")))
   bot.command("joke", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("joke")))
+  bot.command("news", async (ctx) => {
+    if (!newsConfigured()) {
+      return ctx.reply("Новини ще не підключені: у змінній NEWS_RSS_URL потрібна адреса RSS-стрічки.")
+    }
+    try {
+      const items = await getNews(5)
+      if (!items.length) return ctx.reply("Новин зараз не вдалося отримати. Спробуйте пізніше.")
+      await ctx.reply(
+        "📰 Останні новини\n\n" + items.map((n, i) => `${i + 1}. ${n.title}\n${n.link}`).join("\n\n"),
+        { link_preview_options: { is_disabled: true } }
+      )
+    } catch (e) {
+      console.error("[news] error:", e?.message || e)
+      await ctx.reply("⚠️ Не вдалося отримати новини.")
+    }
+  })
+
+  bot.command("history", (ctx) =>
+    ctx.reply(historyFor(kyivNow().dayNum) || "На сьогодні запису немає. Спробуйте завтра 🙂")
+  )
   bot.command("quiz", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("quiz")))
+  bot.command("riddle", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("riddle")))
+  bot.command("proverb", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("proverb")))
 
   bot.callbackQuery(/^st2:(\w+)$/, async (ctx) => {
     await ctx.answerCallbackQuery()
@@ -323,6 +351,8 @@ export function registerCommands(bot) {
       case "wtips": chat.wtips = !chat.wtips; break
       case "rates": chat.rates = !chat.rates; break
       case "fun": chat.fun = !chat.fun; break
+      case "greet": chat.greet = !chat.greet; break
+      case "history": chat.history = !chat.history; break
       case "ftime":
         chat.funTime = FUNTIMES[(FUNTIMES.indexOf(chat.funTime) + 1) % FUNTIMES.length]
         break
@@ -443,6 +473,10 @@ export function registerCommands(bot) {
       { command: "fact", description: "Цікавий факт" },
       { command: "joke", description: "Жарт" },
       { command: "quiz", description: "Вікторина" },
+      { command: "riddle", description: "Загадка" },
+      { command: "proverb", description: "Прислів'я" },
+      { command: "history", description: "Цього дня в історії" },
+      { command: "news", description: "Останні новини" },
       { command: "settings", description: "Налаштування сповіщень" },
       { command: "help", description: "Допомога" },
     ])

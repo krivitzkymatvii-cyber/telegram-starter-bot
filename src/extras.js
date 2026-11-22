@@ -11,6 +11,8 @@ import { fetchAlerts, evaluateAlarm } from "./alarm.js"
 import { getDailyForecast, tipsFromDaily } from "./weatherTips.js"
 import { funForDay, sendFun } from "./fun.js"
 import { viberEnabled, postViberText } from "../viber.js"
+import { holidaysFor, historyFor, personalFor, isWeekday } from "./dates.js"
+import { ensureChat } from "./store.js"
 
 const TASK_TIMEOUT = 90_000
 
@@ -136,6 +138,28 @@ async function dailyTick(api) {
       }
     }
 
+    // привітання зі святами, особисті дати й «цього дня в історії» (08:00–09:00)
+    if (inWindow(480)) {
+      if (chat.greet !== false) {
+        const key = `${dayNum * DAY}:greet`
+        if (!chat.sent[key]) {
+          chat.sent[key] = 1
+          for (const text of [...holidaysFor(dayNum), ...personalFor(dayNum)]) {
+            await safeSend(api, chatId, text)
+          }
+        }
+      }
+
+      if (chat.history !== false) {
+        const key = `${dayNum * DAY}:hist`
+        if (!chat.sent[key]) {
+          chat.sent[key] = 1
+          const text = historyFor(dayNum)
+          if (text) await safeSend(api, chatId, text)
+        }
+      }
+    }
+
     // щоденна родзинка
     if (chat.fun && inWindow(chat.funTime)) {
       const key = `${dayNum * DAY}:fun`
@@ -149,10 +173,35 @@ async function dailyTick(api) {
   save()
 }
 
+// ---- нагадування про сміття (лише Viber, Дмитрівка) ----
+// TRASH_DAY: 0=нд ... 3=середа (за замовчуванням), TRASH_TIME: "07:00"
+async function trashTick() {
+  if (!viberEnabled()) return
+
+  const wd = Number(process.env.TRASH_DAY ?? 3)
+  const [h, m] = (process.env.TRASH_TIME || "07:00").split(":").map(Number)
+  const start = h * 60 + (m || 0)
+  const { dayNum, minutes } = kyivNow()
+
+  if (!isWeekday(dayNum, wd) || minutes < start || minutes >= start + 180) return
+
+  const vChat = ensureChat("viber") // тут зберігаємо, що вже надіслано
+  const key = `${dayNum * DAY}:trash`
+  if (vChat.sent[key]) return
+  vChat.sent[key] = 1
+  save()
+
+  await postViberText(
+    process.env.TRASH_TEXT ||
+      "🗑️ Дмитрівка: сьогодні вивозять сміття!\nНе забудьте виставити баки чи пакети зранку."
+  ).catch((e) => console.error("[trash] viber error:", e?.message || e))
+}
+
 export function startExtras(api) {
   const rem = guarded("reminders", () => remindersTick(api))
   const alm = guarded("alarm", () => alarmTick(api))
   const day = guarded("daily", () => dailyTick(api))
+  const trash = guarded("trash", () => trashTick())
 
   setTimeout(rem, 5_000)
   setInterval(rem, 30_000)
@@ -160,6 +209,8 @@ export function startExtras(api) {
   setTimeout(alm, 8_000)
   setInterval(day, 60_000)
   setTimeout(day, 12_000)
+  setInterval(trash, 60_000)
+  setTimeout(trash, 15_000)
 
   console.log(
     "[extras] started" +

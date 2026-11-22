@@ -1,4 +1,5 @@
 import { safeSend } from "./send.js"
+import { moreFacts, moreJokes, moreQuizzes, riddles, proverbs } from "./fun2.js"
 
 const facts = [
   "Мед майже не псується: у давньоєгипетських гробницях знаходили горщики з медом віком у тисячі років.",
@@ -52,23 +53,31 @@ const quizzes = [
   kind: "quiz", q, options, correct, explanation,
 }))
 
-const pools = { fact: facts, joke: jokes, quiz: quizzes }
-const kinds = ["fact", "joke", "quiz"]
+const pools = {
+  fact: [...facts, ...moreFacts],
+  joke: [...jokes, ...moreJokes],
+  quiz: [...quizzes, ...moreQuizzes],
+  riddle: riddles,
+  proverb: proverbs,
+}
+const kinds = ["fact", "joke", "quiz", "riddle", "proverb"]
 
 // однаковий для всіх у конкретний день
 export function funForDay(dayNum) {
-  const kind = kinds[dayNum % 3]
+  const kind = kinds[dayNum % kinds.length]
   const pool = pools[kind]
-  return pool[Math.floor(dayNum / 3) % pool.length]
+  return pool[Math.floor(dayNum / kinds.length) % pool.length]
 }
 
 export function randomFun(kind) {
-  const pool = pools[kind] || pools[kinds[Math.floor(Math.random() * 3)]]
+  const pool = pools[kind] || pools[kinds[Math.floor(Math.random() * kinds.length)]]
   return pool[Math.floor(Math.random() * pool.length)]
 }
 
 export async function sendFun(api, chatId, item) {
-  if (item.kind !== "quiz") return safeSend(api, chatId, item.text)
+  if (item.kind !== "quiz") {
+    return safeSend(api, chatId, item.text, item.html ? { extra: { parse_mode: "HTML" } } : {})
+  }
 
   try {
     await api.sendPoll(chatId, item.q, item.options, {

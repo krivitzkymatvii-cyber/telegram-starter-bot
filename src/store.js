@@ -37,6 +37,8 @@ export const defaults = {
   rates: false, // курс валют у ранковому повідомленні
   fun: false, // щоденна родзинка (факт/жарт/вікторина)
   funTime: 1080, // 18:00
+  greet: true, // привітання зі святами та особисті дати
+  history: true, // «цього дня в історії»
 }
 
 export const getChat = (id) => db.chats[id]
