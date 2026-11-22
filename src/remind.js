@@ -7,7 +7,8 @@ export const remindHelp =
   "/remind сьогодні 18:30 купити хліб\n" +
   "/remind завтра о 8:00 забрати посилку\n" +
   "/remind 25.11 09:00 до лікаря\n" +
-  "/remind щодня 21:00 випити ліки\n\n" +
+  "/remind щодня 21:00 випити ліки\n" +
+  "/remind viber завтра о 8:00 текст (ще й у Viber, лише для дозволених)\n\n" +
   "Усі нагадування: /reminders"
 
 const toDayNum = (y, m, d) => Math.floor(Date.UTC(y, m - 1, d) / 86400000)
@@ -89,7 +90,7 @@ export function fmtReminder(r) {
     r.kind === "daily"
       ? `щодня о ${fmtTime(r.time)}`
       : `${dayLabel(Math.floor(r.due / DAY))} ${fmtTime(r.due % DAY)}`
-  return `#${r.id}  ${when}\n${r.text}`
+  return `#${r.id}  ${when}${r.viber ? "  📣 + Viber" : ""}\n${r.text}`
 }
 
 // Які нагадування спрацьовують зараз. Повертає [{ r, late }].

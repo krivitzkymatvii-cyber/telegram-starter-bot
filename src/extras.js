@@ -53,6 +53,12 @@ async function remindersTick(api) {
 
     await safeSend(api, r.chatId, text)
 
+    if (r.viber && viberEnabled()) {
+      await postViberText(`⏰ Нагадування\n\n${r.text}`).catch((e) =>
+        console.error("[viber] reminder error:", e?.message || e)
+      )
+    }
+
     if (r.kind === "once") doneOnce.push(r.id)
     else r.last = now.dayNum
   }

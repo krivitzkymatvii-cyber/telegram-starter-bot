@@ -16,6 +16,7 @@ import { startExtras } from "./extras.js"
 import { registerMore } from "./more.js"
 import { historyFor } from "./dates.js"
 import { getNews, newsConfigured } from "./news.js"
+import { viberEnabled } from "../viber.js"
 import { kyivNow, fmtTime, fmtDur } from "./schedule.js"
 import { safeSend } from "./send.js"
 import { startScheduler } from "./scheduler.js"
@@ -242,9 +243,32 @@ export function registerCommands(bot) {
 
 
   // ---- нагадування ----
+  bot.command("myid", (ctx) => ctx.reply(`Ваш Telegram ID: ${ctx.from?.id}`))
+
+  // Хто може слати нагадування у Viber-канал: VIBER_REMIND_USERS=123456,789012 (Telegram ID)
+  const viberRemindAllowed = (userId) =>
+    (process.env.VIBER_REMIND_USERS || "")
+      .split(",").map((x) => x.trim()).filter(Boolean)
+      .includes(String(userId))
+
   bot.command("remind", async (ctx) => {
-    const text = (ctx.match || "").trim()
+    let text = (ctx.match || "").trim()
     if (!text) return ctx.reply(remindHelp)
+
+    // «/remind viber завтра о 8:00 текст» — ще й у Viber-канал
+    let toViber = false
+    const vm = text.match(/^(viber|вайбер)\s+(.+)$/i)
+    if (vm) {
+      if (!viberEnabled()) return ctx.reply("Viber ще не підключений до бота.")
+      if (!viberRemindAllowed(ctx.from?.id)) {
+        return ctx.reply(
+          "⛔ Нагадування у Viber доступні лише дозволеним користувачам.\n" +
+            `Ваш Telegram ID: ${ctx.from?.id}. Адміністратор бота має додати його у змінну VIBER_REMIND_USERS.`
+        )
+      }
+      toViber = true
+      text = vm[2]
+    }
 
     const res = parseRemind(text, kyivNow())
     if (!res.ok) return ctx.reply(`⚠️ ${res.error}\n\n${remindHelp}`)
@@ -255,10 +279,10 @@ export function registerCommands(bot) {
 
     const id = addReminder({
       chatId: ctx.chat.id, kind: res.kind, due: res.due, time: res.time,
-      text: res.text, by: ctx.from?.first_name || "",
+      text: res.text, by: ctx.from?.first_name || "", viber: toViber,
     })
 
-    await ctx.reply(`✅ Нагадування #${id}\n${res.whenLabel}\n${res.text}`)
+    await ctx.reply(`✅ Нагадування #${id}${toViber ? " (+ Viber)" : ""}\n${res.whenLabel}\n${res.text}`)
   })
 
   async function showReminders(ctx) {
