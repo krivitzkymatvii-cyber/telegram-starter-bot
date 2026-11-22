@@ -51,7 +51,7 @@ async function remindersTick(api) {
       `⏰ Нагадування${r.by ? ` (від ${r.by})` : ""}\n\n${r.text}` +
       (late ? "\n\n(Запізнилось: бот був недоступний)" : "")
 
-    await safeSend(api, r.chatId, text)
+    if (r.tg !== false) await safeSend(api, r.chatId, text)
 
     if (r.viber && viberEnabled()) {
       await postViberText(`⏰ Нагадування\n\n${r.text}`).catch((e) =>

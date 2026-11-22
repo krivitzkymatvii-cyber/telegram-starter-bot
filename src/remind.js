@@ -90,7 +90,7 @@ export function fmtReminder(r) {
     r.kind === "daily"
       ? `щодня о ${fmtTime(r.time)}`
       : `${dayLabel(Math.floor(r.due / DAY))} ${fmtTime(r.due % DAY)}`
-  return `#${r.id}  ${when}${r.viber ? "  📣 + Viber" : ""}\n${r.text}`
+  return `#${r.id}  ${when}${r.viber ? (r.tg === false ? "  📣 лише Viber" : "  📣 + Viber") : ""}\n${r.text}`
 }
 
 // Які нагадування спрацьовують зараз. Повертає [{ r, late }].

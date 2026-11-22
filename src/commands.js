@@ -38,7 +38,9 @@ function mainMenu(chatId) {
     kb.text(`${subs.includes(id) ? "🔔" : "🏡"} ${villages[id].short}`, `v:${id}`).row()
   }
 
-  return kb.text("💵 Курс", "rates").text("⚙️ Налаштування", "st:open")
+  kb.text("💵 Курс", "rates").text("⚙️ Налаштування", "st:open")
+  if (viberEnabled()) kb.row().text("📣 Нагадування у Viber", "vr")
+  return kb
 }
 
 function villageMenu(id, subscribed) {
@@ -250,6 +252,39 @@ export function registerCommands(bot) {
     (process.env.VIBER_REMIND_USERS || "")
       .split(",").map((x) => x.trim()).filter(Boolean)
       .includes(String(userId))
+
+  // Режим «напишіть текст — і він піде у Viber»: чекаємо наступне повідомлення від цієї людини
+  const pendingViber = new Map() // `${chatId}:${userId}` -> час, до якого чекаємо
+  const pendKey = (ctx) => `${ctx.chat.id}:${ctx.from?.id}`
+  const PEND_TTL = 10 * 60_000
+
+  async function startViberReminder(ctx) {
+    if (!viberEnabled()) return ctx.reply("Viber ще не підключений до бота.")
+    if (!viberRemindAllowed(ctx.from?.id)) {
+      return ctx.reply(
+        "⛔ Нагадування у Viber доступні лише дозволеним користувачам.\n" +
+          `Ваш Telegram ID: ${ctx.from?.id}. Адміністратор має додати його у VIBER_REMIND_USERS.`
+      )
+    }
+    pendingViber.set(pendKey(ctx), Date.now() + PEND_TTL)
+    return ctx.reply(
+      "📣 Напишіть одним повідомленням, коли й що нагадати у Viber. Наприклад:\n\n" +
+        "завтра о 8:00 сміття\n" +
+        "через 30 хв збори в школі\n" +
+        "щодня 21:00 вимкнути воду\n\n" +
+        "Скасувати: /cancel"
+    )
+  }
+
+  bot.command("vr", startViberReminder)
+  bot.callbackQuery("vr", async (ctx) => {
+    await ctx.answerCallbackQuery()
+    await startViberReminder(ctx)
+  })
+  bot.command("cancel", (ctx) => {
+    const had = pendingViber.delete(pendKey(ctx))
+    return ctx.reply(had ? "Скасовано." : "Нічого скасовувати.")
+  })
 
   bot.command("remind", async (ctx) => {
     let text = (ctx.match || "").trim()
@@ -475,6 +510,46 @@ export function registerCommands(bot) {
   })
 
   bot.on("message:text", async (ctx) => {
+    const k = pendKey(ctx)
+    const until = pendingViber.get(k)
+
+    if (until && !ctx.message.text.startsWith("/")) {
+      if (Date.now() > until || !viberRemindAllowed(ctx.from?.id)) {
+        pendingViber.delete(k)
+      } else {
+        const res = parseRemind(ctx.message.text, kyivNow())
+        if (!res.ok) {
+          return ctx.reply(`⚠️ ${res.error}\n\nСпробуйте ще раз або /cancel.\n\n${remindHelp}`)
+        }
+        if (listReminders(ctx.chat.id).length >= 30) {
+          pendingViber.delete(k)
+          return ctx.reply("⚠️ Забагато нагадувань (максимум 30). Видаліть зайві: /reminders")
+        }
+
+        pendingViber.delete(k)
+        const id = addReminder({
+          chatId: ctx.chat.id, kind: res.kind, due: res.due, time: res.time,
+          text: res.text, by: ctx.from?.first_name || "", viber: true, tg: false,
+        })
+        return ctx.reply(`✅ Нагадування у Viber #${id}\n${res.whenLabel}\n${res.text}`)
+      }
+    }
+
+    // Без команди: «viber завтра о 8:00 сміття» (для дозволених користувачів, у приватному чаті чи групі)
+    const direct = ctx.message.text.match(/^(?:viber|вайбер)[\s,:]+(.+)$/is)
+    if (direct && viberEnabled() && viberRemindAllowed(ctx.from?.id)) {
+      const res = parseRemind(direct[1], kyivNow())
+      if (!res.ok) return ctx.reply(`⚠️ ${res.error}\n\n${remindHelp}`)
+      if (listReminders(ctx.chat.id).length >= 30) {
+        return ctx.reply("⚠️ Забагато нагадувань (максимум 30). Видаліть зайві: /reminders")
+      }
+      const id = addReminder({
+        chatId: ctx.chat.id, kind: res.kind, due: res.due, time: res.time,
+        text: res.text, by: ctx.from?.first_name || "", viber: true, tg: false,
+      })
+      return ctx.reply(`✅ Нагадування у Viber #${id}\n${res.whenLabel}\n${res.text}`)
+    }
+
     if (!ctx.message.text.startsWith("/")) {
       await ctx.reply("Щоб переглянути графік, натисніть /start")
     }
@@ -491,6 +566,7 @@ export function registerCommands(bot) {
       { command: "calendar", description: "Відключення в календар" },
       { command: "share", description: "Поділитися ботом" },
       { command: "remind", description: "Створити нагадування" },
+      { command: "vr", description: "Нагадування у Viber" },
       { command: "reminders", description: "Мої нагадування" },
       { command: "rates", description: "Курс валют НБУ" },
       { command: "alarm", description: "Стан повітряної тривоги" },
