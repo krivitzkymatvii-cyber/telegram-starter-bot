@@ -44,9 +44,14 @@ export async function processVillage({
 
   const targets = [[0, today], [1, tomorrow]]
 
+  // Поки ВОЕ не опублікувало графік на завтра, вкладка «завтра» показує сьогоднішній.
+  // Такий «графік» вважаємо ще не опублікованим (але після 23:30 приймаємо: він справді міг збігтися).
+  const todaySig = today ? sigOf(today) : null
+  const tomorrowIsStale = (s) => s === tomorrow && todaySig !== null && sigOf(s) === todaySig && minutes < 1410
+
   // перший прохід після підписки: запам'ятовуємо графік без сповіщень
   if (!sub.primed) {
-    for (const [off, s] of targets) if (s) sub.seen[dayNum + off] = sigOf(s)
+    for (const [off, s] of targets) if (s && !(off === 1 && tomorrowIsStale(s))) sub.seen[dayNum + off] = sigOf(s)
     sub.primed = true
     return msgs
   }
@@ -71,6 +76,9 @@ export async function processVillage({
       }
       continue
     }
+
+    // «завтра» збігається із сьогоднішнім: новий графік ще не опублікований
+    if (off === 1 && prev === undefined && tomorrowIsStale(s)) continue
 
     // «завтра» ще те саме, що було вночі: новий графік ще не опублікований
     if (off === 1 && prev === undefined && sub.base?.key === key && sub.base.sig === sig) {
