@@ -10,7 +10,7 @@ import { dueReminders } from "./remind.js"
 import { pollAlarm, evaluateAlarm } from "./alarm.js"
 import { getDailyForecast, tipsFromDaily } from "./weatherTips.js"
 import { funForDay, sendFun } from "./fun.js"
-import { viberEnabled, postViberText } from "../viber.js"
+import { viberEnabled, postViberText, isViberKey } from "../viber.js"
 import { holidaysFor, historyFor, personalFor, isWeekday } from "./dates.js"
 import { ensureChat } from "./store.js"
 
@@ -79,7 +79,7 @@ async function alarmTick(api) {
     console.log("[alarm]", ev.type)
 
     for (const [chatId, chat] of allChats()) {
-      if (chat.alarm === false || chatId === "viber") continue
+      if (chat.alarm === false || isViberKey(chatId)) continue
       await safeSend(api, chatId, ev.text) // тривога завжди зі звуком
     }
 
@@ -102,7 +102,7 @@ async function dailyTick(api) {
   const wantTomorrow = inWindow(1200) // 20:00–21:00
 
   for (const [chatId, chat] of allChats()) {
-    if (chatId === "viber") continue
+    if (isViberKey(chatId)) continue
 
     for (const k of Object.keys(chat.sent)) {
       if (parseInt(k, 10) < (dayNum - 2) * DAY) delete chat.sent[k]

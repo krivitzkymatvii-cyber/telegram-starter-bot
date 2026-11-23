@@ -3,7 +3,7 @@ import http from "node:http"
 import { Bot, webhookCallback } from "grammy"
 import { registerCommands } from "./src/commands.js"
 import {
-  testViberConnection, postViberText, setViberWebhook, startViberCallbackServer,
+  viberChannels, testViberConnection, postViberText, setViberWebhook, startViberCallbackServer,
 } from "./viber.js"
 
 const token = process.env.TELEGRAM_BOT_TOKEN
@@ -35,43 +35,45 @@ function explain(err) {
 }
 
 async function main() {
-  // Viber webhook: без нього Viber відповідає webhookNotSet
-  const viberHook = (process.env.VIBER_WEBHOOK_URL || "").trim()
-  if (viberHook) {
-    try {
-      if (process.env.VIBER_SERVE === "1" && mode !== "webhook") {
-        startViberCallbackServer(http)
-        await new Promise((r) => setTimeout(r, 500))
+  // Viber: для кожного каналу реєструємо webhook, перевіряємо з'єднання й (за потреби) шлемо тест
+  const channels = viberChannels()
+  const hooks = [...new Set(channels.map((c) => c.webhook).filter(Boolean))]
+
+  if (hooks.length && process.env.VIBER_SERVE === "1" && mode !== "webhook") {
+    startViberCallbackServer(http)
+    await new Promise((r) => setTimeout(r, 500))
+  }
+
+  for (const ch of channels) {
+    const tag = `[viber#${ch.n}]`
+
+    if (ch.webhook) {
+      try {
+        await setViberWebhook(ch.webhook, ch)
+        console.log(tag, "webhook set:", ch.webhook)
+      } catch (error) {
+        console.error(tag, "webhook error:", error.message)
       }
-      await setViberWebhook(viberHook)
-      console.log("[viber] webhook set:", viberHook)
-    } catch (error) {
-      console.error("[viber] webhook error:", error.message)
     }
-  }
 
-  // Viber connection check
-  try {
-    const viber = await testViberConnection()
-
-    console.log("[viber] connected:", viber.channel)
-    console.log("[viber] channel ID:", viber.channelId)
-    console.log("[viber] admin ID:", viber.adminId)
-
-    if (!process.env.VIBER_SUPERADMIN_ID) {
-      console.log("[viber] Add VIBER_SUPERADMIN_ID to FadeHost")
-    }
-  } catch (error) {
-    console.error("[viber] connection error:", error.message)
-  }
-
-  // Пробне повідомлення: задайте VIBER_TEST=1, перезапустіть, потім приберіть змінну
-  if (process.env.VIBER_TEST === "1") {
     try {
-      await postViberText("✅ Тест: бот підключений до Viber-каналу")
-      console.log("[viber] test message sent")
+      const info = await testViberConnection(ch)
+      console.log(tag, "connected:", info.channel, "| admin ID:", info.adminId)
+      if (!ch.adminId) {
+        console.log(tag, `Додайте VIBER_SUPERADMIN_ID${ch.n === 1 ? "" : "_" + ch.n} = ${info.adminId}`)
+      }
     } catch (error) {
-      console.error("[viber] test send error:", error.message)
+      console.error(tag, "connection error:", error.message)
+    }
+
+    // Пробне повідомлення: VIBER_TEST=1, перезапустіть, потім приберіть змінну
+    if (process.env.VIBER_TEST === "1" && ch.adminId) {
+      try {
+        await postViberText(`✅ Тест: бот підключений до Viber-каналу #${ch.n}`, ch)
+        console.log(tag, "test message sent")
+      } catch (error) {
+        console.error(tag, "test send error:", error.message)
+      }
     }
   }
 

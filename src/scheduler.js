@@ -8,7 +8,7 @@ import { getWeatherText } from "./weather.js"
 import { safeSend } from "./send.js"
 import { getRatesLine } from "./rates.js"
 import { vDay, vChanged, vBefore, vBack } from "./viberText.js"
-import { viberEnabled, postViberText } from "../viber.js"
+import { viberChannels, isViberKey, postViberText } from "../viber.js"
 
 const TTL = 2 * 60_000 // як часто перечитувати сайт ВОЕ
 const SEND_TIMEOUT = 30_000 // жодна відправка не може висіти довше
@@ -21,13 +21,6 @@ function withTimeout(promise, ms, label) {
   })
   return Promise.race([promise, timeout]).finally(() => clearTimeout(t))
 }
-
-// Службовий «чат» для Viber: свої незалежні налаштування, не залежить від Telegram-чатів.
-const VIBER_KEY = "viber"
-
-// Які населені пункти дублювати у Viber (через кому). За замовчуванням лише Дмитрівка.
-const viberVillages = (process.env.VIBER_VILLAGES || "dmytrivka")
-  .split(",").map((v) => v.trim()).filter(Boolean)
 
 const sigOf = (s) =>
   s.intervals.map(([a, b]) => `${a}-${b}`).join(",") || "none"
@@ -204,8 +197,9 @@ export function startScheduler(api) {
     if (++ticks % 30 === 0) console.log("[scheduler] працює, перевірок:", ticks)
 
     try {
-      const hasViber = viberEnabled() && viberVillages.length > 0
-      const telegramChats = allChats().filter(([id]) => id !== VIBER_KEY)
+      const vChannels = viberChannels().filter((c) => c.adminId && c.villages.length > 0)
+      const hasViber = vChannels.length > 0
+      const telegramChats = allChats().filter(([id]) => !isViberKey(id))
       if (!telegramChats.length && !hasViber) return
 
       const { getSchedule } = await import("./outages.js")
@@ -237,19 +231,19 @@ export function startScheduler(api) {
         }
       }
 
-      // Viber: окремий «чат», одне повідомлення на подію незалежно від кількості Telegram-чатів
-      if (hasViber) {
-        const vChat = ensureChat(VIBER_KEY)
-        syncViberSubs(vChat, viberVillages.filter((id) => villages[id]))
+      // Viber: кожен канал має свій «службовий чат» зі своїми селами й станом
+      for (const ch of vChannels) {
+        const vChat = ensureChat(ch.key)
+        syncViberSubs(vChat, ch.villages.filter((id) => villages[id]))
 
         for (const villageId of vChat.villages) {
           await runVillage({
             chat: vChat, villageId, now, sched,
             deliver: async (m) => {
               try {
-                await postViberText(m.v ?? m.text) // короткий текст, без картинок
+                await postViberText(m.v ?? m.text, ch) // короткий текст, без картинок
               } catch (e) {
-                console.error("[viber] send error:", e?.message || e)
+                console.error(`[viber#${ch.n}] send error:`, e?.message || e)
               }
             },
           })

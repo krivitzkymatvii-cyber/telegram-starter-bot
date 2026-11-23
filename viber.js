@@ -1,11 +1,41 @@
-
 const VIBER_API = "https://chatapi.viber.com/pa"
 
-async function viberRequest(method, payload = {}) {
-  const token = process.env.VIBER_AUTH_TOKEN
+// ---- канали ----
+// Канал 1: VIBER_AUTH_TOKEN, VIBER_SUPERADMIN_ID, VIBER_VILLAGES (за замовчуванням dmytrivka)
+// Канал 2: VIBER_AUTH_TOKEN_2, VIBER_SUPERADMIN_ID_2, VIBER_VILLAGES_2 (за замовчуванням rozhyshche)
+// Webhook: VIBER_WEBHOOK_URL (спільний) або VIBER_WEBHOOK_URL_2 для другого каналу.
+const list = (v) => (v || "").split(",").map((x) => x.trim()).filter(Boolean)
+
+export function viberChannels() {
+  const out = []
+
+  for (const n of [1, 2]) {
+    const sfx = n === 1 ? "" : `_${n}`
+    const token = (process.env[`VIBER_AUTH_TOKEN${sfx}`] || "").trim()
+    if (!token) continue
+
+    out.push({
+      n,
+      key: n === 1 ? "viber" : `viber${n}`, // ключ «службового чату» у сховищі
+      token,
+      adminId: (process.env[`VIBER_SUPERADMIN_ID${sfx}`] || "").trim(),
+      villages: list(process.env[`VIBER_VILLAGES${sfx}`] || (n === 1 ? "dmytrivka" : "rozhyshche")),
+      webhook: (process.env[`VIBER_WEBHOOK_URL${sfx}`] || process.env.VIBER_WEBHOOK_URL || "").trim(),
+    })
+  }
+
+  return out
+}
+
+export const isViberKey = (id) => /^viber\d*$/.test(String(id))
+
+const primary = () => viberChannels().find((c) => c.n === 1) || {}
+
+async function viberRequest(method, payload = {}, ch = primary()) {
+  const token = ch.token
 
   if (!token) {
-    throw new Error("VIBER_AUTH_TOKEN не заданий")
+    throw new Error("Токен Viber-каналу не заданий")
   }
 
   const response = await fetch(`${VIBER_API}/${method}`, {
@@ -37,8 +67,8 @@ async function viberRequest(method, payload = {}) {
   return data
 }
 
-export async function getViberChannelInfo() {
-  const data = await viberRequest("get_account_info")
+export async function getViberChannelInfo(ch = primary()) {
+  const data = await viberRequest("get_account_info", {}, ch)
 
   const admin = (data.members || []).find(
     (member) => member.role === "superadmin"
@@ -55,11 +85,11 @@ export async function getViberChannelInfo() {
   }
 }
 
-export async function postViberText(message) {
-  const adminId = process.env.VIBER_SUPERADMIN_ID
+export async function postViberText(message, ch = primary()) {
+  const adminId = ch.adminId
 
   if (!adminId) {
-    throw new Error("VIBER_SUPERADMIN_ID не заданий")
+    throw new Error("ID адміністратора Viber-каналу не заданий")
   }
 
   if (!message?.trim()) {
@@ -70,11 +100,11 @@ export async function postViberText(message) {
     from: adminId,
     type: "text",
     text: message.trim().slice(0, 7000),
-  })
+  }, ch)
 }
 
-export async function testViberConnection() {
-  const info = await getViberChannelInfo()
+export async function testViberConnection(ch = primary()) {
+  const info = await getViberChannelInfo(ch)
 
   return {
     connected: true,
@@ -84,31 +114,20 @@ export async function testViberConnection() {
   }
 }
 
-export const viberEnabled = () =>
-  Boolean(process.env.VIBER_AUTH_TOKEN && process.env.VIBER_SUPERADMIN_ID)
-
-export async function postViberPicture(url) {
-  const adminId = process.env.VIBER_SUPERADMIN_ID
-
-  if (!adminId) {
-    throw new Error("VIBER_SUPERADMIN_ID не заданий")
-  }
-
-  return viberRequest("post", {
-    from: adminId,
-    type: "picture",
-    media: url,
-  })
+// Основний канал налаштований (для нагадувань, тривог, сміття)
+export const viberEnabled = () => {
+  const ch = primary()
+  return Boolean(ch.token && ch.adminId)
 }
 
 // Viber не дає постити, поки не зареєстровано webhook (публічний https-URL).
-export async function setViberWebhook(url) {
+export async function setViberWebhook(url, ch = primary()) {
   return viberRequest("set_webhook", {
     url,
     event_types: ["failed"],
     send_name: false,
     send_photo: false,
-  })
+  }, ch)
 }
 
 // Мінімальний сервер, який відповідає 200 на запити Viber (потрібен для перевірки webhook)
