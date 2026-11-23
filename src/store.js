@@ -111,7 +111,7 @@ export function dropReminders(ids) {
 
 // ---- стан повітряної тривоги ----
 export const getAlarm = () =>
-  db.alarm || { active: false, level: null, since: null, places: [] }
+  db.alarm || { active: false, level: 0, color: null, since: null, scope: "", clear: 0 }
 
 export function setAlarm(a) {
   db.alarm = a

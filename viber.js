@@ -17,9 +17,15 @@ async function viberRequest(method, payload = {}) {
       ...payload,
       auth_token: token,
     }),
+    signal: AbortSignal.timeout(15000), // без цього запит міг висіти вічно
   })
 
-  const data = await response.json()
+  let data
+  try {
+    data = await response.json()
+  } catch {
+    throw new Error(`Viber API: відповідь не JSON (http ${response.status})`)
+  }
 
   if (!response.ok || data.status !== 0) {
     throw new Error(

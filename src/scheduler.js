@@ -58,14 +58,33 @@ export async function processVillage({
     return msgs
   }
 
+  // Нічне вікно 00:00–06:00: одразу після півночі ВОЕ деякий час віддає вчорашні картинки,
+  // тому сповіщень «змінився/опубліковано» тоді не надсилаємо (див. також grace нижче).
+  const quiet = minutes < 360
+
   // нові та змінені графіки
   for (const [off, s] of targets) {
     if (!s) continue
     const key = dayNum + off
     const sig = sigOf(s)
     const prev = sub.seen[key]
-    sub.seen[key] = sig
 
+    if (quiet) {
+      if (off === 1) {
+        // запам'ятовуємо «старе завтра», щоб не оголосити його опублікованим
+        if (!sub.base || sub.base.key !== key) sub.base = { key, sig }
+      } else if (prev === undefined) {
+        sub.seen[key] = sig
+      }
+      continue
+    }
+
+    // «завтра» ще те саме, що було вночі: новий графік ще не опублікований
+    if (off === 1 && prev === undefined && sub.base?.key === key && sub.base.sig === sig) {
+      continue
+    }
+
+    sub.seen[key] = sig
     if (!chat.alerts) continue
 
     if (prev === undefined) {
@@ -86,7 +105,9 @@ export async function processVillage({
   }
 
   // попередження перед відключенням і «світло має бути»
-  if (chat.notify && today) {
+  // перші 20 хвилин після півночі пропускаємо: дані ВОЕ ще можуть бути вчорашніми
+  // (попередження не губиться: вікно «before» триває до самого відключення)
+  if (chat.notify && today && minutes >= 20) {
     const slots = tomorrow ? [...today.slots, ...tomorrow.slots] : today.slots
     const intervals = slotsToIntervals(slots)
     const events = dueEvents(intervals, minutes, chat.lead, slots.length * 30)

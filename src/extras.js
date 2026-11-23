@@ -7,7 +7,7 @@ import { kyivNow, dayLabel, DAY } from "./schedule.js"
 import { villages } from "./villages.js"
 import { safeSend } from "./send.js"
 import { dueReminders } from "./remind.js"
-import { fetchAlerts, evaluateAlarm } from "./alarm.js"
+import { pollAlarm, evaluateAlarm } from "./alarm.js"
 import { getDailyForecast, tipsFromDaily } from "./weatherTips.js"
 import { funForDay, sendFun } from "./fun.js"
 import { viberEnabled, postViberText } from "../viber.js"
@@ -69,12 +69,9 @@ async function remindersTick(api) {
 
 // ---- повітряні тривоги ----
 async function alarmTick(api) {
-  const token = process.env.ALERTS_TOKEN
-  if (!token) return
-
   const prev = getAlarm()
-  const alerts = await fetchAlerts(token)
-  const { state, events } = evaluateAlarm(prev, alerts)
+  const cur = await pollAlarm()
+  const { state, events } = evaluateAlarm(prev, cur)
 
   if (JSON.stringify(state) !== JSON.stringify(prev)) setAlarm(state)
 
@@ -86,7 +83,8 @@ async function alarmTick(api) {
       await safeSend(api, chatId, ev.text) // тривога завжди зі звуком
     }
 
-    if (viberEnabled() && process.env.VIBER_ALARMS === "on") {
+    // у Viber тривоги йдуть завжди; вимкнути можна змінною VIBER_ALARMS=off
+    if (viberEnabled() && (process.env.VIBER_ALARMS || "").trim().toLowerCase() !== "off") {
       await postViberText(ev.text).catch((e) =>
         console.error("[viber] alarm error:", e?.message || e)
       )
@@ -184,9 +182,10 @@ async function dailyTick(api) {
 async function trashTick() {
   if (!viberEnabled()) return
 
-  const wd = Number(process.env.TRASH_DAY ?? 3)
-  const [h, m] = (process.env.TRASH_TIME || "07:00").split(":").map(Number)
-  const start = h * 60 + (m || 0)
+  const wdRaw = (process.env.TRASH_DAY ?? "").trim()
+  const wd = wdRaw === "" || Number.isNaN(Number(wdRaw)) ? 3 : Number(wdRaw)
+  const tm = (process.env.TRASH_TIME || "07:00").trim().match(/^(\d{1,2}):(\d{2})$/)
+  const start = tm && +tm[1] < 24 && +tm[2] < 60 ? +tm[1] * 60 + +tm[2] : 420
   const { dayNum, minutes } = kyivNow()
 
   if (!isWeekday(dayNum, wd) || minutes < start || minutes >= start + 180) return
@@ -211,15 +210,12 @@ export function startExtras(api) {
 
   setTimeout(rem, 5_000)
   setInterval(rem, 30_000)
-  setInterval(alm, 60_000)
+  setInterval(alm, 30_000)
   setTimeout(alm, 8_000)
   setInterval(day, 60_000)
   setTimeout(day, 12_000)
   setInterval(trash, 60_000)
   setTimeout(trash, 15_000)
 
-  console.log(
-    "[extras] started" +
-      (process.env.ALERTS_TOKEN ? "" : " (тривоги вимкнені: немає ALERTS_TOKEN)")
-  )
+  console.log("[extras] started")
 }

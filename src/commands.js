@@ -14,6 +14,7 @@ import { getRatesText } from "./rates.js"
 import { randomFun, sendFun } from "./fun.js"
 import { startExtras } from "./extras.js"
 import { registerMore } from "./more.js"
+import { PLACE, health } from "./alarm.js"
 import { historyFor } from "./dates.js"
 import { getNews, newsConfigured } from "./news.js"
 import { viberEnabled } from "../viber.js"
@@ -87,8 +88,7 @@ function settingsMenu2(chat) {
 
 const settingsMessage2 = () =>
   "🧩 ДОДАТКОВІ ФУНКЦІЇ\n\n" +
-  "🚨 Тривоги: Волинська область" +
-  (process.env.ALERTS_TOKEN ? "" : " (ще не підключені: потрібен токен)") +
+  "🚨 Тривоги: " + PLACE +
   "\n🌦️ Поради: заморозки, вітер, гроза, ожеледиця тощо\n" +
   "🎭 Родзинка: факт, жарт, вікторина, загадка чи прислів'я щодня\n\n" +
   "⚠️ Бот не замінює офіційні сповіщення й сирени."
@@ -362,21 +362,22 @@ export function registerCommands(bot) {
   })
 
   bot.command("alarm", async (ctx) => {
-    if (!process.env.ALERTS_TOKEN) {
-      return ctx.reply("🚨 Тривоги ще не підключені (немає токена alerts.in.ua).")
-    }
-
     const a = getAlarm()
+    const ago = health.at ? Math.round((Date.now() - health.at) / 60000) : null
+
     await ctx.reply(
       (a.active
-        ? `🚨 Зараз тривога (${a.level === "oblast" ? "уся область" : a.places.join(", ")}), триває ${fmtDur(Math.max(1, Math.round((Date.now() - a.since) / 60000)))}.`
-        : "✅ Зараз тривоги у Волинській області немає.") +
-        "\n\n⚠️ Не замінює офіційні сповіщення та сирени."
+        ? `🚨 Зараз тривога (${PLACE}): ${a.scope}, триває ${fmtDur(Math.max(1, Math.round((Date.now() - a.since) / 60000)))}.`
+        : `✅ Зараз тривоги немає (${PLACE}).`) +
+        "\n\n" +
+        (ago === null
+          ? "ℹ️ Перевірка ще не виконувалась."
+          : `ℹ️ Джерело: ${health.source}, перевірено ${ago === 0 ? "щойно" : `${ago} хв тому`}.` +
+            (health.error ? `\n⚠️ ${health.error}` : "")) +
+        "\n⚠️ Не замінює офіційні сповіщення та сирени."
     )
   })
 
-  bot.command("fact", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("fact")))
-  bot.command("joke", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("joke")))
   bot.command("news", async (ctx) => {
     if (!newsConfigured()) {
       return ctx.reply("Новини ще не підключені: у змінній NEWS_RSS_URL потрібна адреса RSS-стрічки.")
@@ -550,7 +551,8 @@ export function registerCommands(bot) {
       return ctx.reply(`✅ Нагадування у Viber #${id}\n${res.whenLabel}\n${res.text}`)
     }
 
-    if (!ctx.message.text.startsWith("/")) {
+    // у групах мовчимо, щоб не засмічувати чат (відповідаємо лише в приватному)
+    if (ctx.chat.type === "private" && !ctx.message.text.startsWith("/")) {
       await ctx.reply("Щоб переглянути графік, натисніть /start")
     }
   })
