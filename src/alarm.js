@@ -1,8 +1,8 @@
-// Повітряні тривоги для конкретного місця (м. Рожище), без токенів.
-// Основне джерело: siren.pp.ua (дзеркало офіційного API «Повітряна тривога», з громадами).
-// Запасне: ubilling.net.ua (лише область).
+// Повітряні тривоги для конкретного місця (м. Рожище).
+// 1) alerts.in.ua (якщо задано ALERTS_TOKEN) 2) siren.pp.ua (з громадами) 3) ubilling.net.ua (лише область).
 import { fmtDur } from "./schedule.js"
 
+const ALERTS_IN = "https://api.alerts.in.ua/v1/alerts/active.json"
 const SIREN = "https://siren.pp.ua/api/v3/alerts"
 const UBILLING = "https://ubilling.net.ua/aerialalerts/"
 
@@ -55,6 +55,27 @@ export function parseSiren(data) {
   return { ...best, source: "siren.pp.ua" }
 }
 
+// alerts.in.ua: { alerts: [{ location_title, location_type, location_oblast, alert_type }] }
+export function parseAlertsIn(data) {
+  if (!Array.isArray(data?.alerts)) throw new Error("alerts.in.ua: неочікувана відповідь")
+
+  let best = { level: 0, color: null, scope: "" }
+
+  for (const a of data.alerts) {
+    if (a.alert_type !== "air_raid" || a.location_oblast !== "Волинська область") continue
+
+    const name = a.location_type === "oblast" ? "Волинська область" : String(a.location_title || "")
+    const area = AREAS.find((x) => x.test(name))
+    if (!area) continue
+
+    const color = a.alert_level === "red" || a.alert_level === "yellow" ? a.alert_level : null
+    if (area.level > best.level) best = { level: area.level, color, scope: area.scope }
+    else if (area.level === best.level && color === "red") best.color = "red"
+  }
+
+  return { ...best, source: "alerts.in.ua" }
+}
+
 export function parseUbilling(data) {
   const st = data?.states?.["Волинська область"]
   if (typeof st?.alertnow !== "boolean") throw new Error("ubilling: неочікувана відповідь")
@@ -64,9 +85,9 @@ export function parseUbilling(data) {
     : { level: 0, color: null, scope: "", source: "ubilling.net.ua" }
 }
 
-async function getJson(url) {
+async function getJson(url, headers = {}) {
   const res = await fetch(url, {
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...headers },
     signal: AbortSignal.timeout(10000),
   })
   if (!res.ok) throw new Error(`${new URL(url).host}: ${res.status}`)
@@ -74,6 +95,18 @@ async function getJson(url) {
 }
 
 export async function pollAlarm() {
+  const token = (process.env.ALERTS_TOKEN || "").trim()
+
+  if (token) {
+    try {
+      const cur = parseAlertsIn(await getJson(ALERTS_IN, { Authorization: `Bearer ${token}` }))
+      Object.assign(health, { at: Date.now(), source: cur.source, error: "" })
+      return cur
+    } catch (error) {
+      console.error("[alarm] alerts.in.ua:", error?.message || error)
+    }
+  }
+
   try {
     const data = await getJson(SIREN)
     if (!Array.isArray(data)) throw new Error("siren: неочікувана відповідь")
