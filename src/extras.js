@@ -13,6 +13,7 @@ import { funForDay, sendFun } from "./fun.js"
 import { viberEnabled, postViberText, isViberKey } from "../viber.js"
 import { holidaysFor, historyFor, personalFor, isWeekday } from "./dates.js"
 import { ensureChat } from "./store.js"
+import { monthlyTick } from "./monthly.js"
 
 const TASK_TIMEOUT = 90_000
 
@@ -207,6 +208,7 @@ export function startExtras(api) {
   const alm = guarded("alarm", () => alarmTick(api))
   const day = guarded("daily", () => dailyTick(api))
   const trash = guarded("trash", () => trashTick())
+  const monthly = guarded("monthly", () => monthlyTick(api))
 
   setTimeout(rem, 5_000)
   setInterval(rem, 30_000)
@@ -216,6 +218,8 @@ export function startExtras(api) {
   setTimeout(day, 12_000)
   setInterval(trash, 60_000)
   setTimeout(trash, 15_000)
+  setInterval(monthly, 60_000)
+  setTimeout(monthly, 20_000)
 
   console.log("[extras] started")
 }

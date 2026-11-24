@@ -14,6 +14,7 @@ import { getRatesText } from "./rates.js"
 import { randomFun, sendFun } from "./fun.js"
 import { startExtras } from "./extras.js"
 import { registerMore } from "./more.js"
+import { registerMonthly } from "./monthly.js"
 import { PLACE, health } from "./alarm.js"
 import { historyFor } from "./dates.js"
 import { getNews, newsConfigured } from "./news.js"
@@ -216,6 +217,7 @@ export function registerCommands(bot) {
         "/month — статистика за 30 днів\n" +
         "/calendar — відключення в календар телефона\n" +
         "/share — поділитися ботом\n" +
+        "/monthly — нагадування про показники й інтернет\n" +
         "/settings — налаштування сповіщень\n" +
         "/remind — нагадування (приклади: /remind)\n" +
         "/reminders — мої нагадування\n" +
@@ -233,6 +235,7 @@ export function registerCommands(bot) {
 
   bot.command("ping", (ctx) => ctx.reply("Бот працює ✅"))
   registerMore(bot)
+  registerMonthly(bot)
   bot.command("today", (ctx) => forSubscribed(ctx, (c, id) => showDay(c, id, "today")))
   bot.command("tomorrow", (ctx) => forSubscribed(ctx, (c, id) => showDay(c, id, "tomorrow")))
   bot.command("now", (ctx) => forSubscribed(ctx, showNow))
@@ -567,6 +570,7 @@ export function registerCommands(bot) {
       { command: "month", description: "Статистика за 30 днів" },
       { command: "calendar", description: "Відключення в календар" },
       { command: "share", description: "Поділитися ботом" },
+      { command: "monthly", description: "Показники й оплата інтернету" },
       { command: "remind", description: "Створити нагадування" },
       { command: "vr", description: "Нагадування у Viber" },
       { command: "reminders", description: "Мої нагадування" },
