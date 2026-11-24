@@ -1,7 +1,9 @@
 // Повітряні тривоги для конкретного місця (м. Рожище).
-// 1) alerts.in.ua (якщо задано ALERTS_TOKEN) 2) siren.pp.ua (з громадами) 3) ubilling.net.ua (лише область).
+// 1) офіційне API ukrainealarm.com (якщо задано UKRAINEALARM_TOKEN)
+// 2) alerts.in.ua (якщо задано ALERTS_TOKEN) 3) siren.pp.ua (з громадами) 4) ubilling.net.ua (лише область).
 import { fmtDur } from "./schedule.js"
 
+const OFFICIAL = "https://api.ukrainealarm.com/api/v3/alerts"
 const ALERTS_IN = "https://api.alerts.in.ua/v1/alerts/active.json"
 const SIREN = "https://siren.pp.ua/api/v3/alerts"
 const UBILLING = "https://ubilling.net.ua/aerialalerts/"
@@ -95,6 +97,21 @@ async function getJson(url, headers = {}) {
 }
 
 export async function pollAlarm() {
+  // офіційний ключ UkraineAlarm: заголовок Authorization без «Bearer», формат відповіді той самий, що в siren.pp.ua
+  const official = (process.env.UKRAINEALARM_TOKEN || "").trim()
+
+  if (official) {
+    try {
+      const data = await getJson(OFFICIAL, { Authorization: official })
+      if (!Array.isArray(data)) throw new Error("ukrainealarm: неочікувана відповідь")
+      const cur = { ...parseSiren(data), source: "api.ukrainealarm.com" }
+      Object.assign(health, { at: Date.now(), source: cur.source, error: "" })
+      return cur
+    } catch (error) {
+      console.error("[alarm] ukrainealarm:", error?.message || error)
+    }
+  }
+
   const token = (process.env.ALERTS_TOKEN || "").trim()
 
   if (token) {
