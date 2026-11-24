@@ -1,6 +1,9 @@
-// Короткі повідомлення для Viber: без картинок, жартів, порад і погоди.
+// Короткі повідомлення для Viber: без картинок, порад і погоди; лише один короткий жарт у кінці.
 import { kyivNow, dayLabel, fmtTime, fmtRange, fmtDur, fmtHours } from "./schedule.js"
 import { parseSig } from "./messages.js"
+import { jokeBefore, jokeBack, jokeChange, jokeNoOutages } from "./jokes.js"
+
+const withJoke = (text, joke) => (joke ? `${text}\n\n😄 ${joke}` : text)
 
 const lines = (intervals) =>
   intervals.map(([a, b]) => `🔴 ${fmtRange(a, b)}`).join("\n")
@@ -16,7 +19,10 @@ export function vDay({ village, off, intervals, published = false }) {
   const head = `${village.short}, ${dayWord(off)} ${dateOf(off)}`
 
   if (!intervals.length) {
-    return `🎉 ${village.short}: ${dayWord(off)} ВІДКЛЮЧЕНЬ НЕ БУДЕ! УРАААА! 🎉\n${dateOf(off)}, черга ${village.queue}`
+    return withJoke(
+      `🎉 ${village.short}: ${dayWord(off)} ВІДКЛЮЧЕНЬ НЕ БУДЕ! УРАААА! 🎉\n${dateOf(off)}, черга ${village.queue}`,
+      jokeNoOutages()
+    )
   }
 
   return (
@@ -30,29 +36,37 @@ export function vChanged({ village, off, oldSig, newSig }) {
   const now = parseSig(newSig)
   const head = `⚠️ Графік змінився\n${village.short}, ${dayWord(off)} ${dateOf(off)}`
 
+  const was = parseSig(oldSig)
+  const joke = jokeChange(was, now)
+
   if (!now.length) {
-    return `🎉 ${village.short}: ${dayWord(off)} тепер ВІДКЛЮЧЕНЬ НЕ БУДЕ! УРАААА! 🎉\n(графік змінився, ${dateOf(off)})`
+    return withJoke(
+      `🎉 ${village.short}: ${dayWord(off)} тепер ВІДКЛЮЧЕНЬ НЕ БУДЕ! УРАААА! 🎉\n(графік змінився, ${dateOf(off)})`,
+      joke
+    )
   }
 
-  const was = parseSig(oldSig)
-  return (
+  return withJoke(
     `${head}\n\nСтало:\n${lines(now)}\n\nРазом: ${total(now)} год` +
-    (was.length ? `\n\nБуло:\n${lines(was)}` : "\n\nБуло: без відключень")
+      (was.length ? `\n\nБуло:\n${lines(was)}` : "\n\nБуло: без відключень"),
+    joke
   )
 }
 
 // Попередження перед відключенням
 export function vBefore({ village, ev, nowMin }) {
-  return (
+  return withJoke(
     `⏰ ${village.short}: через ${fmtDur(ev.s - nowMin)} відключення\n` +
-    `🔴 ${fmtRange(ev.s, ev.e)} (${fmtDur(ev.e - ev.s)})`
+      `🔴 ${fmtRange(ev.s, ev.e)} (${fmtDur(ev.e - ev.s)})`,
+    jokeBefore(ev)
   )
 }
 
 // Світло має з'явитися
 export function vBack({ village, ev, next }) {
-  return (
+  return withJoke(
     `🟢 ${village.short}: світло має бути (з ${fmtTime(ev.e)})\n` +
-    (next ? `Далі: 🔴 ${fmtRange(next[0], next[1])}` : "Більше відключень за графіком немає ✅")
+      (next ? `Далі: 🔴 ${fmtRange(next[0], next[1])}` : "Більше відключень за графіком немає ✅"),
+    jokeBack()
   )
 }

@@ -2,6 +2,7 @@ import {
   kyivNow, dayLabel, fmtTime, fmtRange, fmtDur, fmtHours,
   intervalsText, lightText, currentStatus, DAY,
 } from "./schedule.js"
+import { jokeBefore, jokeBack, jokeChange, jokesEnabled } from "./jokes.js"
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 
@@ -33,6 +34,7 @@ const tips = [
 ]
 
 export function jokeFor(hours) {
+  if (!jokesEnabled()) return ""
   if (hours === 0) return pick(jokes.none)
   if (hours <= 4) return pick(jokes.light)
   if (hours <= 7) return pick(jokes.medium)
@@ -71,7 +73,8 @@ export function buildDayMessage({ village, day, sched, weather, morning = false 
   ]
 
   if (off === 0) parts.push(statusLine(sched.slots, minutes))
-  parts.push(jokeFor(sched.totalHours))
+  const dayJoke = jokeFor(sched.totalHours)
+  if (dayJoke) parts.push(dayJoke)
   if (weather) parts.push(weather)
   parts.push("ℹ️ Фактичний час перемикання може відрізнятися.")
 
@@ -103,18 +106,22 @@ export function buildNowMessage({ village, today, tomorrow }) {
 }
 
 export function buildBefore({ village, ev, nowMin }) {
+  const joke = jokeBefore(ev)
   return (
     `⏰ «${village.name}» (черга ${village.queue})\n` +
     `Через ${fmtDur(ev.s - nowMin)} (о ${fmtTime(ev.s)}) відключення світла: ` +
     `${fmtRange(ev.s, ev.e)}, це ${fmtDur(ev.e - ev.s)}.\n\n` +
+    (joke ? `😄 ${joke}\n\n` : "") +
     `💡 ${pick(tips)}`
   )
 }
 
 export function buildBack({ village, ev, next }) {
+  const joke = jokeBack()
   return (
     `🟢 «${village.name}»: за графіком світло вже має з'явитися (з ${fmtTime(ev.e)}).\n` +
     "Якщо ще немає, трохи зачекайте: перемикання може затримуватися.\n\n" +
+    (joke ? `😄 ${joke}\n\n` : "") +
     (next
       ? `Наступне відключення: 🔴 ${fmtRange(next[0], next[1])}`
       : "Подальших відключень за графіком немає ✅")
@@ -130,11 +137,13 @@ export function buildChanged({ village, off, oldSig, newSig }) {
   const { dayNum } = kyivNow()
   const when = off === 0 ? "сьогодні" : "завтра"
   const block = (sig) => intervalsText(parseSig(sig))
+  const joke = jokeChange(parseSig(oldSig), parseSig(newSig))
 
   return (
     `⚠️ Графік на ${when}, ${dayLabel(dayNum + off)}, змінився!\n` +
     `📍 «${village.name}», черга ${village.queue}\n\n` +
-    `Було:\n${block(oldSig)}\n\nСтало:\n${block(newSig)}`
+    `Було:\n${block(oldSig)}\n\nСтало:\n${block(newSig)}` +
+    (joke ? `\n\n😄 ${joke}` : "")
   )
 }
 
@@ -148,7 +157,7 @@ export function buildPublished({ village, sched }) {
       lightText(sched.intervals),
       `Разом без світла: ${fmtHours(sched.totalHours)} год`,
     ].filter(Boolean).join("\n") +
-    `\n\n${jokeFor(sched.totalHours)}`
+    (jokeFor(sched.totalHours) ? `\n\n${jokeFor(sched.totalHours)}` : "")
   )
 }
 
