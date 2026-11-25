@@ -85,7 +85,7 @@ export async function getViberChannelInfo(ch = primary()) {
   }
 
   return {
-    name: data.chat_hostname,
+    name: data.name || data.chat_hostname || data.uri || "(назва не вказана)",
     channelId: data.Id,
     adminId: admin.id,
   }
