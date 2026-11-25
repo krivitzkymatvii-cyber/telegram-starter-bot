@@ -102,19 +102,51 @@ async function getJson(url, headers = {}) {
   return res.json()
 }
 
-export async function pollAlarm() {
-  // офіційний ключ UkraineAlarm: заголовок Authorization без «Bearer», формат відповіді той самий, що в siren.pp.ua
-  const official = (process.env.UKRAINEALARM_TOKEN || "").trim()
+// Офіційне API має ліміт запитів (HTTP 429). Тому: не частіше за UKRAINEALARM_INTERVAL секунд
+// (за замовчуванням 60) і з наростаючою паузою після 429; між запитами працюють запасні джерела.
+const official = { nextAt: 0, fails: 0, note: "" }
 
-  if (official) {
+async function fetchOfficial(token) {
+  const res = await fetch(OFFICIAL, {
+    headers: { Accept: "application/json", Authorization: token }, // без «Bearer»
+    signal: AbortSignal.timeout(10000),
+  })
+
+  if (res.status === 429) {
+    const ra = Number(res.headers?.get?.("retry-after"))
+    const err = new Error("api.ukrainealarm.com: 429 (ліміт запитів)")
+    err.status = 429
+    err.retryAfterMs = Number.isFinite(ra) && ra > 0 ? ra * 1000 : 0
+    throw err
+  }
+
+  if (!res.ok) throw new Error(`api.ukrainealarm.com: ${res.status}`)
+
+  const data = await res.json()
+  if (!Array.isArray(data)) throw new Error("ukrainealarm: неочікувана відповідь")
+  return data
+}
+
+export async function pollAlarm() {
+  const key = (process.env.UKRAINEALARM_TOKEN || "").trim()
+
+  if (key && Date.now() >= official.nextAt) {
     try {
-      const data = await getJson(OFFICIAL, { Authorization: official })
-      if (!Array.isArray(data)) throw new Error("ukrainealarm: неочікувана відповідь")
+      const data = await fetchOfficial(key)
       const cur = { ...parseSiren(data), source: "api.ukrainealarm.com" }
+      const gap = Math.max(15, Number(process.env.UKRAINEALARM_INTERVAL) || 60) * 1000
+      Object.assign(official, { fails: 0, nextAt: Date.now() + gap, note: "" })
       Object.assign(health, { at: Date.now(), source: cur.source, error: "" })
       return cur
     } catch (error) {
-      console.error("[alarm] ukrainealarm:", error?.message || error)
+      official.fails++
+      const wait =
+        error.status === 429
+          ? Math.max(error.retryAfterMs || 0, Math.min(5 * 60_000 * 2 ** (official.fails - 1), 30 * 60_000))
+          : 2 * 60_000
+      official.nextAt = Date.now() + wait
+      official.note = `офіційне API на паузі ${Math.round(wait / 60000)} хв (${error.status === 429 ? "ліміт запитів" : "помилка"})`
+      console.error("[alarm] ukrainealarm:", error?.message || error, `— пауза ${Math.round(wait / 1000)} с`)
     }
   }
 
@@ -123,7 +155,7 @@ export async function pollAlarm() {
   if (token) {
     try {
       const cur = parseAlertsIn(await getJson(ALERTS_IN, { Authorization: `Bearer ${token}` }))
-      Object.assign(health, { at: Date.now(), source: cur.source, error: "" })
+      Object.assign(health, { at: Date.now(), source: cur.source, error: official.note })
       return cur
     } catch (error) {
       console.error("[alarm] alerts.in.ua:", error?.message || error)
@@ -134,7 +166,7 @@ export async function pollAlarm() {
     const data = await getJson(SIREN)
     if (!Array.isArray(data)) throw new Error("siren: неочікувана відповідь")
     const cur = parseSiren(data)
-    Object.assign(health, { at: Date.now(), source: cur.source, error: "" })
+    Object.assign(health, { at: Date.now(), source: cur.source, error: official.note })
     return cur
   } catch (error) {
     console.error("[alarm] siren:", error?.message || error)
