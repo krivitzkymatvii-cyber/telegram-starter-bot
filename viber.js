@@ -2,14 +2,20 @@ const VIBER_API = "https://chatapi.viber.com/pa"
 
 // ---- канали ----
 // Канал 1: VIBER_AUTH_TOKEN, VIBER_SUPERADMIN_ID, VIBER_VILLAGES (за замовчуванням dmytrivka)
-// Канал 2: VIBER_AUTH_TOKEN_2, VIBER_SUPERADMIN_ID_2, VIBER_VILLAGES_2 (за замовчуванням rozhyshche)
+// Канал 2: VIBER_AUTH_TOKEN_2, VIBER_SUPERADMIN_ID_2, VIBER_VILLAGES_2 (за замовчуванням pozharky)
+// Канал 3: VIBER_AUTH_TOKEN_3, VIBER_SUPERADMIN_ID_3, VIBER_VILLAGES_3 (за замовчуванням rozhyshche)
+// Канали 4 і 5: так само, але VIBER_VILLAGES_4/5 треба задати самому.
+// Тривоги: канал 1 і будь-який канал, де є село rozhyshche, отримують їх за замовчуванням;
+// решта лише з VIBER_ALARMS_N=on. Вимкнути: VIBER_ALARMS=off / VIBER_ALARMS_N=off.
 // Webhook: VIBER_WEBHOOK_URL (спільний) або VIBER_WEBHOOK_URL_2 для другого каналу.
 const list = (v) => (v || "").split(",").map((x) => x.trim()).filter(Boolean)
+
+const DEFAULT_VILLAGES = { 1: "dmytrivka", 2: "pozharky", 3: "rozhyshche" }
 
 export function viberChannels() {
   const out = []
 
-  for (const n of [1, 2]) {
+  for (const n of [1, 2, 3, 4, 5]) {
     const sfx = n === 1 ? "" : `_${n}`
     const token = (process.env[`VIBER_AUTH_TOKEN${sfx}`] || "").trim()
     if (!token) continue
@@ -19,7 +25,7 @@ export function viberChannels() {
       key: n === 1 ? "viber" : `viber${n}`, // ключ «службового чату» у сховищі
       token,
       adminId: (process.env[`VIBER_SUPERADMIN_ID${sfx}`] || "").trim(),
-      villages: list(process.env[`VIBER_VILLAGES${sfx}`] || (n === 1 ? "dmytrivka" : "rozhyshche")),
+      villages: list(process.env[`VIBER_VILLAGES${sfx}`] || DEFAULT_VILLAGES[n] || ""),
       webhook: (process.env[`VIBER_WEBHOOK_URL${sfx}`] || process.env.VIBER_WEBHOOK_URL || "").trim(),
     })
   }
