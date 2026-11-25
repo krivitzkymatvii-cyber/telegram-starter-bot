@@ -10,7 +10,7 @@ import { dueReminders } from "./remind.js"
 import { pollAlarm, evaluateAlarm } from "./alarm.js"
 import { getDailyForecast, tipsFromDaily } from "./weatherTips.js"
 import { funForDay, sendFun } from "./fun.js"
-import { viberEnabled, postViberText, isViberKey } from "../viber.js"
+import { viberEnabled, postViberText, isViberKey, viberChannels } from "../viber.js"
 import { holidaysFor, historyFor, personalFor, isWeekday } from "./dates.js"
 import { ensureChat } from "./store.js"
 import { monthlyTick } from "./monthly.js"
@@ -84,10 +84,15 @@ async function alarmTick(api) {
       await safeSend(api, chatId, ev.text) // тривога завжди зі звуком
     }
 
-    // у Viber тривоги йдуть завжди; вимкнути можна змінною VIBER_ALARMS=off
-    if (viberEnabled() && (process.env.VIBER_ALARMS || "").trim().toLowerCase() !== "off") {
-      await postViberText(ev.text).catch((e) =>
-        console.error("[viber] alarm error:", e?.message || e)
+    // Viber: тривоги за замовчуванням йдуть у канал 1 і в канал із Рожищем (rozhyshche).
+    // Решта каналів лише з VIBER_ALARMS_N=on. Вимкнути канал: VIBER_ALARMS=off / VIBER_ALARMS_N=off.
+    for (const ch of viberChannels().filter((c) => c.adminId)) {
+      const flag = (process.env[`VIBER_ALARMS${ch.n === 1 ? "" : `_${ch.n}`}`] || "").trim().toLowerCase()
+      const byDefault = ch.n === 1 || ch.villages.includes("rozhyshche")
+      if (flag === "off" || (!byDefault && flag !== "on")) continue
+
+      await postViberText(ev.text, ch).catch((e) =>
+        console.error(`[viber${ch.n}] alarm error:`, e?.message || e)
       )
     }
   }

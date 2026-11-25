@@ -2,6 +2,12 @@
 // 1) офіційне API ukrainealarm.com (якщо задано UKRAINEALARM_TOKEN)
 // 2) alerts.in.ua (якщо задано ALERTS_TOKEN) 3) siren.pp.ua (з громадами) 4) ubilling.net.ua (лише область).
 import { fmtDur } from "./schedule.js"
+import { jokeAlarm } from "./jokes.js"
+
+const withComment = (text, type) => {
+  const j = jokeAlarm(type)
+  return j ? `${text}\n\n${j}` : text // головне (що робити) завжди вгорі, коментар після
+}
 
 const OFFICIAL = "https://api.ukrainealarm.com/api/v3/alerts"
 const ALERTS_IN = "https://api.alerts.in.ua/v1/alerts/active.json"
@@ -161,6 +167,7 @@ export function evaluateAlarm(prev, cur, nowMs = Date.now()) {
         (cur.color ? `\n${COLOR[cur.color]}` : "") +
         "\n\nПрямуйте в укриття.",
     })
+    events[0].text = withComment(events[0].text, "start")
   } else if (cur.level > 0) {
     const widened = cur.level > prev.level
     const worse = prev.color !== "red" && cur.color === "red"
@@ -176,6 +183,7 @@ export function evaluateAlarm(prev, cur, nowMs = Date.now()) {
           (cur.color ? `\n${COLOR[cur.color]}` : "") +
           "\n\nПрямуйте в укриття.",
       })
+      events[0].text = withComment(events[0].text, "escalate")
     }
   } else if (prev.active) {
     // відбій лише після двох порожніх перевірок поспіль, щоб не реагувати на збій
@@ -186,7 +194,7 @@ export function evaluateAlarm(prev, cur, nowMs = Date.now()) {
       state = { ...EMPTY }
       events.push({
         type: "end",
-        text: `✅ Відбій повітряної тривоги (${PLACE}).\nТривала: ${fmtDur(mins)}.`,
+        text: withComment(`✅ Відбій повітряної тривоги (${PLACE}).\nТривала: ${fmtDur(mins)}.`, "end"),
       })
     }
   } else {
