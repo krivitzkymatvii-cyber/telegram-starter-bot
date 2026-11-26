@@ -117,7 +117,7 @@ export function buildBefore({ village, ev, nowMin }) {
 }
 
 export function buildBack({ village, ev, next }) {
-  const joke = jokeBack()
+  const joke = jokeBack(ev)
   return (
     `🟢 «${village.name}»: за графіком світло вже має з'явитися (з ${fmtTime(ev.e)}).\n` +
     "Якщо ще немає, трохи зачекайте: перемикання може затримуватися.\n\n" +

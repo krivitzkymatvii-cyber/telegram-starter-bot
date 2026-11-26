@@ -5,6 +5,10 @@ import { jokeBefore, jokeBack, jokeChange, jokeNoOutages } from "./jokes.js"
 
 const withJoke = (text, joke) => (joke ? `${text}\n\n😄 ${joke}` : text)
 
+// Повідомлення про сам графік (день, опубліковано, змінився) у Viber без жартів.
+// Увімкнути: JOKES_GRAPH=on. Попередження перед відключенням і «світло має бути» жартують як раніше.
+const graphJokes = () => (process.env.JOKES_GRAPH || "").trim().toLowerCase() === "on"
+
 const lines = (intervals) =>
   intervals.map(([a, b]) => `🔴 ${fmtRange(a, b)}`).join("\n")
 
@@ -21,7 +25,7 @@ export function vDay({ village, off, intervals, published = false }) {
   if (!intervals.length) {
     return withJoke(
       `🎉 ${village.short}: ${dayWord(off)} ВІДКЛЮЧЕНЬ НЕ БУДЕ! УРАААА! 🎉\n${dateOf(off)}, черга ${village.queue}`,
-      jokeNoOutages()
+      graphJokes() ? jokeNoOutages() : ""
     )
   }
 
@@ -37,7 +41,7 @@ export function vChanged({ village, off, oldSig, newSig }) {
   const head = `⚠️ Графік змінився\n${village.short}, ${dayWord(off)} ${dateOf(off)}`
 
   const was = parseSig(oldSig)
-  const joke = jokeChange(was, now)
+  const joke = graphJokes() ? jokeChange(was, now) : ""
 
   if (!now.length) {
     return withJoke(
@@ -67,6 +71,6 @@ export function vBack({ village, ev, next }) {
   return withJoke(
     `🟢 ${village.short}: світло має бути (з ${fmtTime(ev.e)})\n` +
       (next ? `Далі: 🔴 ${fmtRange(next[0], next[1])}` : "Більше відключень за графіком немає ✅"),
-    jokeBack()
+    jokeBack(ev)
   )
 }
