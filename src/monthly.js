@@ -10,7 +10,7 @@ import { isViberKey, viberEnabled, postViberText } from "../viber.js"
 const MS_DAY = 86_400_000
 
 const TASKS = [
-  { id: "meters", done: "Показники лічильників подано", todo: "Подати показники лічильників", btn: "✅ Подав показники" },
+  { id: "meters", done: "Показники лічильників подано", todo: "Подати показники лічильників (внести: /meter 12345)", btn: "✅ Подав показники" },
   { id: "internet", done: "Інтернет оплачено", todo: "Оплатити інтернет", btn: "✅ Оплатив інтернет" },
 ]
 
@@ -173,4 +173,9 @@ export function registerMonthly(bot) {
       .editMessageText(reminderText(done), left ? { reply_markup: reminderKeyboard(done) } : {})
       .catch(() => {}) // «message is not modified» тощо
   })
+}
+
+// Викликається, коли показник внесено командою /meter
+export function markMetersDone(chat, dayNum) {
+  if (chat.monthly?.on) stateFor(chat, dayNum).meters = true
 }

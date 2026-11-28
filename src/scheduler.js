@@ -6,6 +6,7 @@ import {
 } from "./messages.js"
 import { getWeatherText } from "./weather.js"
 import { safeSend } from "./send.js"
+import { taleKeyboard, wantsTaleButton } from "./tales.js"
 import { getRatesLine } from "./rates.js"
 import { vDay, vChanged, vBefore, vBack } from "./viberText.js"
 import { viberChannels, isViberKey, postViberText } from "../viber.js"
@@ -116,6 +117,7 @@ export async function processVillage({
           text: buildBefore({ village, ev, nowMin: minutes }),
           silent,
           v: vBefore({ village, ev, nowMin: minutes }),
+          kb: wantsTaleButton(ev) ? taleKeyboard() : undefined,
         })
       } else {
         const next = intervals.find(([a]) => a >= ev.e) || null
@@ -226,7 +228,11 @@ export function startScheduler(api) {
           await runVillage({
             chat, villageId, now, sched,
             deliver: (m) =>
-              safeSend(api, chatId, m.text, { photoUrl: m.photoUrl, silent: m.silent }),
+              safeSend(api, chatId, m.text, {
+                photoUrl: m.photoUrl,
+                silent: m.silent,
+                extra: m.kb ? { reply_markup: m.kb } : {},
+              }),
           })
         }
       }

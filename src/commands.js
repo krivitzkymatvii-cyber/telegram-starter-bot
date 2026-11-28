@@ -15,6 +15,9 @@ import { randomFun, sendFun } from "./fun.js"
 import { startExtras } from "./extras.js"
 import { registerMore } from "./more.js"
 import { registerMonthly } from "./monthly.js"
+import { registerMeter } from "./meter.js"
+import { registerTales } from "./tales.js"
+import { captureCommands, registerUI, startHub, showHome } from "./ui.js"
 import { PLACE, health } from "./alarm.js"
 import { historyFor } from "./dates.js"
 import { getNews, newsConfigured } from "./news.js"
@@ -185,6 +188,7 @@ async function forSubscribed(ctx, fn) {
 }
 
 export function registerCommands(bot) {
+  const registry = captureCommands(bot) // потрібно кнопкам меню
   // Застарілі кнопки (після перезапуску бота) не мають ламати обробку
   bot.use(async (ctx, next) => {
     if (ctx.callbackQuery) {
@@ -198,18 +202,12 @@ export function registerCommands(bot) {
     await next()
   })
 
-  bot.command("start", (ctx) => {
-    ensureChat(ctx.chat.id) // щоб доходили тривоги й поради
-    save()
-    return ctx.reply("⚡ ГРАФІК ВІДКЛЮЧЕНЬ СВІТЛА\n\nОберіть населений пункт:", {
-      reply_markup: mainMenu(ctx.chat.id),
-    })
-  })
+  bot.command("start", (ctx) => startHub(ctx))
 
   bot.command("help", (ctx) =>
     ctx.reply(
       "⚡ Бот показує графіки відключень Волиньобленерго.\n\n" +
-        "/start — вибір населеного пункту\n" +
+        "/start, /menu — головне меню з кнопками\n" +
         "/today — графік на сьогодні\n" +
         "/tomorrow — графік на завтра\n" +
         "/now — що зараз і що далі\n" +
@@ -218,6 +216,8 @@ export function registerCommands(bot) {
         "/calendar — відключення в календар телефона\n" +
         "/share — поділитися ботом\n" +
         "/monthly — нагадування про показники й інтернет\n" +
+        "/meter — облік електрики (/meter 12345), /tariff — тариф\n" +
+        "/kazka — казка на ніч\n" +
         "/settings — налаштування сповіщень\n" +
         "/remind — нагадування (приклади: /remind)\n" +
         "/reminders — мої нагадування\n" +
@@ -236,6 +236,8 @@ export function registerCommands(bot) {
   bot.command("ping", (ctx) => ctx.reply("Бот працює ✅"))
   registerMore(bot)
   registerMonthly(bot)
+  registerMeter(bot)
+  registerTales(bot)
   bot.command("today", (ctx) => forSubscribed(ctx, (c, id) => showDay(c, id, "today")))
   bot.command("tomorrow", (ctx) => forSubscribed(ctx, (c, id) => showDay(c, id, "tomorrow")))
   bot.command("now", (ctx) => forSubscribed(ctx, showNow))
@@ -401,6 +403,8 @@ export function registerCommands(bot) {
   bot.command("history", (ctx) =>
     ctx.reply(historyFor(kyivNow().dayNum) || "На сьогодні запису немає. Спробуйте завтра 🙂")
   )
+  bot.command("fact", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("fact")))
+  bot.command("joke", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("joke")))
   bot.command("quiz", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("quiz")))
   bot.command("riddle", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("riddle")))
   bot.command("proverb", (ctx) => sendFun(ctx.api, ctx.chat.id, randomFun("proverb")))
@@ -510,8 +514,10 @@ export function registerCommands(bot) {
 
   bot.callbackQuery("back", async (ctx) => {
     await ctx.answerCallbackQuery()
-    await ctx.reply("🏡 Оберіть населений пункт:", { reply_markup: mainMenu(ctx.chat.id) })
+    await showHome(ctx, true)
   })
+
+  registerUI(bot, { registry, showDay, showNow })
 
   bot.on("message:text", async (ctx) => {
     const k = pendKey(ctx)
@@ -562,7 +568,8 @@ export function registerCommands(bot) {
 
   bot.api
     .setMyCommands([
-      { command: "start", description: "Вибір населеного пункту" },
+      { command: "start", description: "Початок і головне меню" },
+      { command: "menu", description: "Головне меню з кнопками" },
       { command: "today", description: "Графік на сьогодні" },
       { command: "tomorrow", description: "Графік на завтра" },
       { command: "now", description: "Що зараз і що далі" },
@@ -571,6 +578,9 @@ export function registerCommands(bot) {
       { command: "calendar", description: "Відключення в календар" },
       { command: "share", description: "Поділитися ботом" },
       { command: "monthly", description: "Показники й оплата інтернету" },
+      { command: "meter", description: "Облік електрики: показники, прогноз" },
+      { command: "tariff", description: "Тариф на електрику" },
+      { command: "kazka", description: "Казка на ніч" },
       { command: "remind", description: "Створити нагадування" },
       { command: "vr", description: "Нагадування у Viber" },
       { command: "reminders", description: "Мої нагадування" },
