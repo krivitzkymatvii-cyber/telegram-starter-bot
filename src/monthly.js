@@ -10,7 +10,7 @@ import { isViberKey, viberEnabled, postViberText } from "../viber.js"
 const MS_DAY = 86_400_000
 
 const TASKS = [
-  { id: "meters", done: "Показники лічильників подано", todo: "Подати показники лічильників (внести: /meter 12345)", btn: "✅ Подав показники" },
+  { id: "meters", done: "Показники лічильників подано", todo: "Подати показники лічильників (/meter 12345 для світла, /gas 1234.567 для газу)", btn: "✅ Подав показники" },
   { id: "internet", done: "Інтернет оплачено", todo: "Оплатити інтернет", btn: "✅ Оплатив інтернет" },
 ]
 

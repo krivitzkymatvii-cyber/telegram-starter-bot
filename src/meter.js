@@ -1,12 +1,23 @@
-// Облік електрики: показники лічильника, споживання, прогноз і вартість.
-//   /meter 12345        внести показник за сьогодні
-//   /meter 12000 01.10  внести показник за дату (щоб заповнити історію)
-//   /meter              підсумок і прогноз
-//   /tariff 4.32        тариф, грн за кВт·год (або змінна ELECTRICITY_TARIFF)
+// Облік лічильників: електрика (кВт·год) і газ (м³): показники, споживання, прогноз і вартість.
+//   /meter 12345        внести показник світла за сьогодні      /gas 1234.567  показник газу
+//   /meter 12000 01.10  показник за дату (історія)               /gas          підсумок і прогноз
+//   /meter              підсумок і прогноз                       /gastariff 7.96  тариф, грн за м³
+//   /tariff 4.32        тариф, грн за кВт·год (або ELECTRICITY_TARIFF; для газу GAS_TARIFF)
 import { InlineKeyboard } from "grammy"
 import { ensureChat, getChat, save } from "./store.js"
 import { kyivNow, dayLabel } from "./schedule.js"
 import { markMetersDone } from "./monthly.js"
+
+export const KINDS = {
+  electricity: {
+    field: "meter", cmd: "meter", tariffCmd: "tariff", icon: "⚡", title: "Електрика", unit: "кВт·год",
+    tariffUnit: "грн за кВт·год", env: "ELECTRICITY_TARIFF", example: "12345", tariffExample: "4.32", digits: 1, reset: "meter:reset",
+  },
+  gas: {
+    field: "gas", cmd: "gas", tariffCmd: "gastariff", icon: "🔥", title: "Газ", unit: "м³",
+    tariffUnit: "грн за м³", env: "GAS_TARIFF", example: "1234.567", tariffExample: "7.96", digits: 3, reset: "meter:reset:gas",
+  },
+}
 
 const MS = 86_400_000
 const MONTHS = ["січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"]
@@ -29,16 +40,16 @@ export function fmtNum(x, digits = 0) {
 // ---------- чиста логіка ----------
 
 // Додає показник; повертає { ok, list } або { ok:false, error }
-export function addReading(list, d, v) {
+export function addReading(list, d, v, digits = 1) {
   const sorted = [...list].sort((a, b) => a.d - b.d)
   const prev = [...sorted].reverse().find((r) => r.d < d)
   const next = sorted.find((r) => r.d > d)
 
   if (prev && v < prev.v) {
-    return { ok: false, error: `Це менше за попередній показник ${fmtNum(prev.v, 1)} від ${shortDate(prev.d)}. Перевірте цифри.` }
+    return { ok: false, error: `Це менше за попередній показник ${fmtNum(prev.v, digits)} від ${shortDate(prev.d)}. Перевірте цифри.` }
   }
   if (next && v > next.v) {
-    return { ok: false, error: `Це більше за наступний показник ${fmtNum(next.v, 1)} від ${shortDate(next.d)}. Перевірте дату.` }
+    return { ok: false, error: `Це більше за наступний показник ${fmtNum(next.v, digits)} від ${shortDate(next.d)}. Перевірте дату.` }
   }
 
   const out = sorted.filter((r) => r.d !== d)
@@ -114,14 +125,15 @@ export function summarize(list, today, tariff) {
 
 const money = (kwh, tariff) => (tariff ? ` · ${fmtNum(kwh * tariff)} грн` : "")
 
-export function formatSummary(s) {
-  if (!s) return "Показників ще немає. Внесіть перший: /meter 12345"
+export function formatSummary(s, kind = KINDS.electricity) {
+  if (!s) return `Показників ще немає. Внесіть перший: /${kind.cmd} ${kind.example}`
 
-  const lines = [`⚡ Електрика\n\nОстанній показник: ${fmtNum(s.last.v, 1)} кВт·год (${shortDate(s.last.d)})`]
+  const u = kind.unit
+  const lines = [`${kind.icon} ${kind.title}\n\nОстанній показник: ${fmtNum(s.last.v, kind.digits)} ${u} (${shortDate(s.last.d)})`]
 
   if (s.prev) {
     lines.push(
-      `З ${shortDate(s.prev.d)}: +${fmtNum(s.delta, 1)} кВт·год за ${s.days} дн.` +
+      `З ${shortDate(s.prev.d)}: +${fmtNum(s.delta, 1)} ${u} за ${s.days} дн.` +
         (s.perDay != null ? ` (≈ ${fmtNum(s.perDay, 1)} на добу)` : "") +
         money(s.delta, s.tariff)
     )
@@ -145,19 +157,19 @@ export function formatSummary(s) {
 
   if (s.forecast) {
     lines.push(
-      `🔮 Прогноз на ${s.forecast.monthLabel}: ≈ ${fmtNum(s.forecast.kwh)} кВт·год${money(s.forecast.kwh, s.tariff)}` +
+      `🔮 Прогноз на ${s.forecast.monthLabel}: ≈ ${fmtNum(s.forecast.kwh)} ${u}${money(s.forecast.kwh, s.tariff)}` +
         (s.vsPrev != null ? `\nПорівняно з минулим місяцем: ${s.vsPrev >= 0 ? "+" : ""}${fmtNum(s.vsPrev)}%` : "")
     )
   }
 
-  if (!s.tariff) lines.push("💡 Вкажіть тариф, щоб бачити суму: /tariff 4.32")
+  if (!s.tariff) lines.push(`💡 Вкажіть тариф, щоб бачити суму: /${kind.tariffCmd} ${kind.tariffExample}`)
   return lines.join("\n\n")
 }
 
 // ---------- розбір команди ----------
 
 export function parseMeterArgs(text, now) {
-  const m = String(text || "").trim().match(/^(\d+(?:[.,]\d{1,2})?)(?:\s+(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?)?$/)
+  const m = String(text || "").trim().match(/^(\d+(?:[.,]\d{1,3})?)(?:\s+(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?)?$/)
   if (!m) return null
   const v = parseFloat(m[1].replace(",", "."))
   if (!(v >= 0) || v > 99_999_999) return null
@@ -174,71 +186,80 @@ export function parseMeterArgs(text, now) {
   return { v, d }
 }
 
-const tariffOf = (chat) => chat.meter?.tariff ?? (Number(process.env.ELECTRICITY_TARIFF) || null)
+const tariffOf = (chat, kind) => chat[kind.field]?.tariff ?? (Number(process.env[kind.env]) || null)
 
-const helpText =
-  "⚡ Облік електрики\n\n" +
-  "/meter 12345 — внести показник за сьогодні\n" +
-  "/meter 12000 01.10 — показник за дату (щоб заповнити історію)\n" +
-  "/meter — споживання, прогноз і сума\n" +
-  "/tariff 4.32 — тариф, грн за кВт·год"
+const helpText = (k) =>
+  `${k.icon} Облік: ${k.title.toLowerCase()}\n\n` +
+  `/${k.cmd} ${k.example} — внести показник за сьогодні\n` +
+  `/${k.cmd} ${k.example} 01.10 — показник за дату (щоб заповнити історію)\n` +
+  `/${k.cmd} — споживання, прогноз і сума\n` +
+  `/${k.tariffCmd} ${k.tariffExample} — тариф, ${k.tariffUnit}`
 
-export function registerMeter(bot) {
-  bot.command("meter", async (ctx) => {
+function registerKind(bot, kind) {
+  bot.command(kind.cmd, async (ctx) => {
     const chat = ensureChat(ctx.chat.id)
     const arg = (ctx.match || "").trim()
-    const list = chat.meter?.readings || []
+    const list = chat[kind.field]?.readings || []
+    const today = kyivNow().dayNum
 
     if (/^(скинути|reset)$/i.test(arg)) {
-      return ctx.reply("Видалити всі показники?", {
-        reply_markup: new InlineKeyboard().text("🗑 Так, видалити", "meter:reset").text("Скасувати", "meter:cancel"),
+      return ctx.reply(`Видалити всі показники (${kind.title.toLowerCase()})?`, {
+        reply_markup: new InlineKeyboard().text("🗑 Так, видалити", kind.reset).text("Скасувати", "meter:cancel"),
       })
     }
 
     if (!arg) {
-      return ctx.reply(formatSummary(summarize(list, kyivNow().dayNum, tariffOf(chat))) + (list.length ? "" : "\n\n" + helpText))
+      return ctx.reply(formatSummary(summarize(list, today, tariffOf(chat, kind)), kind) + (list.length ? "" : "\n\n" + helpText(kind)))
     }
 
     const parsed = parseMeterArgs(arg, kyivNow())
-    if (!parsed) return ctx.reply("⚠️ Не зрозумів.\n\n" + helpText)
+    if (!parsed) return ctx.reply("⚠️ Не зрозумів.\n\n" + helpText(kind))
 
-    const res = addReading(list, parsed.d, parsed.v)
+    const res = addReading(list, parsed.d, parsed.v, kind.digits)
     if (!res.ok) return ctx.reply("⚠️ " + res.error)
 
-    chat.meter = { ...(chat.meter || {}), readings: res.list }
-    markMetersDone(chat, kyivNow().dayNum) // якщо ввімкнено місячне нагадування, позначаємо «подано»
+    chat[kind.field] = { ...(chat[kind.field] || {}), readings: res.list }
+    markMetersDone(chat, today) // якщо ввімкнено місячне нагадування, позначаємо «подано»
     save()
 
     await ctx.reply(
-      `✅ Записано: ${fmtNum(parsed.v, 1)} кВт·год (${shortDate(parsed.d)})\n\n` +
-        formatSummary(summarize(res.list, kyivNow().dayNum, tariffOf(chat)))
+      `✅ Записано: ${fmtNum(parsed.v, kind.digits)} ${kind.unit} (${shortDate(parsed.d)})\n\n` +
+        formatSummary(summarize(res.list, today, tariffOf(chat, kind)), kind)
     )
   })
 
-  bot.command("tariff", async (ctx) => {
+  bot.command(kind.tariffCmd, async (ctx) => {
     const chat = ensureChat(ctx.chat.id)
     const arg = (ctx.match || "").trim().replace(",", ".")
 
     if (!arg) {
-      const t = tariffOf(chat)
-      return ctx.reply(t ? `Тариф: ${fmtNum(t, 2)} грн за кВт·год. Змінити: /tariff 4.32` : "Тариф не вказано. Вкажіть: /tariff 4.32")
+      const t = tariffOf(chat, kind)
+      return ctx.reply(
+        t
+          ? `Тариф (${kind.title.toLowerCase()}): ${fmtNum(t, 2)} ${kind.tariffUnit}. Змінити: /${kind.tariffCmd} ${kind.tariffExample}`
+          : `Тариф не вказано. Вкажіть: /${kind.tariffCmd} ${kind.tariffExample}`
+      )
     }
 
     const t = parseFloat(arg)
-    if (!(t > 0 && t < 100)) return ctx.reply("⚠️ Вкажіть число, наприклад: /tariff 4.32")
+    if (!(t > 0 && t < 1000)) return ctx.reply(`⚠️ Вкажіть число, наприклад: /${kind.tariffCmd} ${kind.tariffExample}`)
 
-    chat.meter = { ...(chat.meter || { readings: [] }), tariff: t }
+    chat[kind.field] = { ...(chat[kind.field] || { readings: [] }), tariff: t }
     save()
-    await ctx.reply(`✅ Тариф: ${fmtNum(t, 2)} грн за кВт·год`)
+    await ctx.reply(`✅ Тариф (${kind.title.toLowerCase()}): ${fmtNum(t, 2)} ${kind.tariffUnit}`)
   })
 
-  bot.callbackQuery("meter:reset", async (ctx) => {
+  bot.callbackQuery(kind.reset, async (ctx) => {
     const chat = getChat(ctx.chat.id)
-    if (chat?.meter) chat.meter.readings = []
+    if (chat?.[kind.field]) chat[kind.field].readings = []
     save()
     await ctx.answerCallbackQuery({ text: "Видалено" })
-    await ctx.editMessageText("🗑 Показники видалено.").catch(() => {})
+    await ctx.editMessageText(`🗑 Показники (${kind.title.toLowerCase()}) видалено.`).catch(() => {})
   })
+}
+
+export function registerMeter(bot) {
+  for (const kind of Object.values(KINDS)) registerKind(bot, kind)
 
   bot.callbackQuery("meter:cancel", async (ctx) => {
     await ctx.answerCallbackQuery()

@@ -217,6 +217,7 @@ export function registerCommands(bot) {
         "/share — поділитися ботом\n" +
         "/monthly — нагадування про показники й інтернет\n" +
         "/meter — облік електрики (/meter 12345), /tariff — тариф\n" +
+        "/gas — облік газу (/gas 1234.567), /gastariff — тариф\n" +
         "/kazka — казка на ніч\n" +
         "/settings — налаштування сповіщень\n" +
         "/remind — нагадування (приклади: /remind)\n" +
@@ -580,6 +581,8 @@ export function registerCommands(bot) {
       { command: "monthly", description: "Показники й оплата інтернету" },
       { command: "meter", description: "Облік електрики: показники, прогноз" },
       { command: "tariff", description: "Тариф на електрику" },
+      { command: "gas", description: "Облік газу: показники, прогноз" },
+      { command: "gastariff", description: "Тариф на газ" },
       { command: "kazka", description: "Казка на ніч" },
       { command: "remind", description: "Створити нагадування" },
       { command: "vr", description: "Нагадування у Viber" },

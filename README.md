@@ -1,58 +1,25 @@
-# Telegram starter bot
+# Світло: сімейний бот Telegram + Viber
 
-[![Deploy to FadeHost](https://fadehost.com/deploy-button.svg)](https://laplace.fadehost.com/register?intent=bot&repo=https://github.com/FadeHost/telegram-starter-bot)
+Графіки відключень ВОЕ для Дмитрівки, Пожарок і Рожища, сповіщення в Telegram і до 5 Viber-каналів,
+повітряні тривоги (м. Рожище), погода, нагадування, облік світла й газу, казки й розваги.
+Node.js + [grammY](https://grammy.dev). Запуск: `npm install && npm start`.
 
-A small Telegram bot to deploy in one click and then make your own: `/start`,
-`/help`, `/ping`, `/id`, an inline button and an echo. Node.js and
-[grammY](https://grammy.dev). Runs in polling mode by default, so it needs no
-web address; switch to webhook mode when you have one.
+## Що де лежить
+- `index.js`: запуск бота й Viber-каналів
+- `viber.js`: робота з Viber (канали 1–5)
+- `src/`: уся решта (меню `ui.js`, команди `commands.js`, сповіщення `scheduler.js`, тривоги `alarm.js`, лічильники `meter.js`, казки `tales.js` тощо)
+- `.env.example`: перелік усіх змінних (значення задайте у панелі FadeHost)
 
-## Run it on FadeHost
+## Як оновити з телефону
+1. Розпакуйте архів. Завантажте файли на GitHub: **Add file → Upload files**, `src/*` у папку `src`, решту в корінь.
+2. Видаліть із репозиторію все застаріле: усі `.js`-файли в корені, крім `index.js` і `viber.js`, а також `src/viber.js`,
+   `viber (1).js`, `download`, `env.example` і папку `data/`.
+3. **Commit changes**, потім перезапустіть бота на FadeHost.
 
-1. In Telegram, talk to [@BotFather](https://t.me/BotFather), send `/newbot`,
-   and copy the token.
-2. In the FadeHost panel, Apps, Host something, choose Telegram bot and this
-   template, paste the token, deploy.
-3. Send `/start` to your bot.
+## Команди
+`/start` і `/menu` (меню кнопками), `/today`, `/tomorrow`, `/now`, `/stats`, `/alarm`, `/rates`, `/settings`,
+`/meter`, `/tariff` (світло), `/gas`, `/gastariff` (газ), `/remind`, `/reminders`, `/monthly`, `/calendar`,
+`/news`, `/history`, `/fact`, `/joke`, `/quiz`, `/riddle`, `/proverb`, `/kazka`, `/help`.
 
-The free tier (256 MB) runs it comfortably. Paid tiers add an always-on web
-address, which webhook mode can use.
-
-## Run it anywhere else
-
-```bash
-npm install
-TELEGRAM_BOT_TOKEN=123456789:AAF... npm start
-```
-
-## Webhook mode
-
-Telegram pushes updates to your app instead of the app asking. Set:
-
-| Variable | Value |
-| --- | --- |
-| `TELEGRAM_MODE` | `webhook` |
-| `WEBHOOK_URL` | the app's public https address, e.g. `https://my-bot.fadehost.app` |
-| `WEBHOOK_SECRET` | any random string (recommended); Telegram sends it with every update and the bot refuses updates without it |
-| `PORT` | the port to listen on (set for you on FadeHost) |
-
-Telegram only delivers webhooks to ports 443, 80, 88 and 8443 over https with
-a valid certificate. A FadeHost web address on 443 meets that as it is.
-
-## Make it yours
-
-Everything the bot does is in `src/commands.js`. Add a command:
-
-```js
-bot.command("weather", (ctx) => ctx.reply("Sunny."))
-```
-
-Rules that keep bots healthy: answer callback queries (`ctx.answerCallbackQuery`)
-so buttons stop spinning, keep long work off the update handler, and never log
-the token.
-
-## Environment
-
-See `.env.example`.
-
-MIT licensed. Built and maintained by FadeHost.
+## Важливо
+Бот не замінює офіційні сповіщення та сирени.
